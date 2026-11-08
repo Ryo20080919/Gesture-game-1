@@ -27,8 +27,8 @@ button:active{background:#3bc473}
 <video class="input_video" playsinline muted></video>
 <div id="lobby" style="display:none;position:absolute;left:0;right:0;top:130px;margin:0 auto;width:min(420px,90%);background:#1e1e2fee;border:2px solid #4eef90;border-radius:12px;padding:14px;z-index:5">
   <div id="lobbyMsg" style="font-size:18px;margin-bottom:10px;white-space:pre-line"></div>
-  <div><button id="btnHost">ルームを作る</button></div>
-  <div style="margin:10px 0"><input id="codeIn" inputmode="numeric" maxlength="4" placeholder="4桁コード" style="font-size:22px;width:130px;text-align:center"> <button id="btnJoin">参加</button></div>
+  <div id="rowHost"><button id="btnHost">ルームを作る</button></div>
+  <div id="rowJoin" style="margin:10px 0"><input id="codeIn" inputmode="numeric" maxlength="4" placeholder="4桁コード" style="font-size:22px;width:130px;text-align:center"> <button id="btnJoin">参加</button></div>
   <button id="btnBack" style="background:#888">戻る</button>
 </div>
 <canvas id="gameCanvas" width="800" height="450"></canvas>
@@ -60,7 +60,7 @@ let ammo = 30;
 let shotCooldown = 0;
 let bossShootCooldown = 0;
 let gameState = "mode"; // "mode", "select", "bossSelect", "lobby", "playing", "clear", "gameover"
-let pvp = false;        // true = 対人戦
+let pvp = false, online = false;        // true = 対人戦
 
 const CHARS = [
  {id:'mint',name:'ミント',shape:'drop',color:'#7be07b',hp:90,speed:2.8,
@@ -134,7 +134,7 @@ window.addEventListener('keydown', e => {
     }
     if (gameState === "mode" && (e.key === 'h' || e.key === 'H')) { helpPage = 0; gameState = "help"; }
     if (gameState === "help" && e.key === 'Escape') gameState = "mode";
-    if (gameState === "mode" && /^[12]$/.test(e.key)) { pvp = e.key === '2'; gameState = "select"; }
+    if (gameState === "mode" && /^[123]$/.test(e.key)) { pvp = e.key !== '1'; online = e.key === '3'; gameState = "select"; }
     else if (gameState === "select" && /^[1-9]$/.test(e.key)) chooseChar(+e.key - 1);
     else if (gameState === "bossSelect" && /^[1-4]$/.test(e.key)) startGame(+e.key - 1);
     if (gameState === "bossSelect" && e.key === 'Escape') resetGame();
@@ -198,7 +198,7 @@ function resetGame() { // ボス戦→キャラ選択へ / 対人戦→モード
 function chooseChar(i) {
     if (!CHARS[i]) return;
     ch = CHARS[i];
-    if (pvp) { gameState = "lobby"; showLobby(true); } else gameState = "bossSelect";
+    if (pvp) { gameState = "lobby"; showLobby(true); if (online) { matching = true; findMatch(); } } else gameState = "bossSelect";
 }
 function startGame(lv) {
     bossLv = lv; bossCfg = BOSSES[lv];
@@ -222,7 +222,8 @@ canvasElement.addEventListener('pointerdown', e => {
         const r0 = canvasElement.getBoundingClientRect();
         const mx = (e.clientX - r0.left) * 800 / r0.width, my = (e.clientY - r0.top) * 450 / r0.height;
         if (my > 375) { helpPage = 0; gameState = "help"; return; }      // 「あそびかた」ボタン
-        pvp = mx > 400; gameState = "select"; return;
+        const idx = mx < 271 ? 0 : mx < 529 ? 1 : 2;
+        pvp = idx > 0; online = idx === 2; gameState = "select"; return;
     }
     if (gameState === "help") { if (++helpPage >= HELP.length) gameState = "mode"; return; }
     if (gameState !== "select" && gameState !== "bossSelect") return;
@@ -308,9 +309,57 @@ let peer = null, conn = null, sentHello = false, netNote = "", tick = 0, bid = 0
 let oppCh = CHARS[0], opp = { x:100, y:350, hp:100, inv:0, rf:0, c:[], b:[] };
 const lobbyEl = document.getElementById('lobby'), lobbyMsgEl = document.getElementById('lobbyMsg');
 const lobbyMsg = t => lobbyMsgEl.textContent = t;
-function showLobby(on) { lobbyEl.style.display = on ? 'block' : 'none'; if (on) lobbyMsg('ルームを作る か、相手のコードを入力'); }
-function resetPeer() { try { conn && conn.close(); peer && peer.destroy(); } catch (e) {} conn = null; peer = null; sentHello = false; }
-function closeNet() { resetPeer(); showLobby(false); }
+function showLobby(on) {
+    lobbyEl.style.display = on ? 'block' : 'none';
+    for (const id of ['rowHost', 'rowJoin']) document.getElementById(id).style.display = online ? 'none' : '';
+    if (on) lobbyMsg(online ? '対戦相手を探しています…' : 'ルームを作る か、相手のコードを入力');
+}
+let qpeer = null, matching = false, matchTimer = null;
+function resetPeer() { try { conn && conn.close(); peer && peer.destroy(); qpeer && qpeer.destroy(); } catch (e) {} conn = null; peer = null; qpeer = null; sentHello = false; }
+function closeNet() { matching = false; clearTimeout(matchTimer); resetPeer(); showLobby(false); }
+
+// --- オンライン対戦（ランダムマッチ）---
+// 共通の待ち合わせID(QUEUE_ID)を取れた人が「待機役」、取れなかった人は待機役につないで専用ルームIDを教えてもらう
+const QUEUE_ID = 'spiritarena-queue-1';
+function matchRetry(ms) { if (!matching) return; clearTimeout(matchTimer); matchTimer = setTimeout(findMatch, ms || 600 + Math.random() * 1200); }
+function watchdog() { setTimeout(() => { if (matching && gameState === "lobby") findMatch(); }, 12000); }  // つながらなければ探し直す
+function findMatch() {
+    if (!matching) return;
+    if (typeof Peer === 'undefined') return lobbyMsg('通信ライブラリを読み込めません（ネット接続を確認）');
+    resetPeer();
+    lobbyMsg('対戦相手を探しています…');
+    const me = peer = new Peer();
+    let done = false;
+    me.on('open', () => {
+        const q = me.connect(QUEUE_ID);
+        q.on('data', m => { if (m.t === 'room' && !done) { done = true; setupConn(me.connect(m.id)); q.close(); watchdog(); } });
+        q.on('close', () => { if (!done) matchRetry(); });
+    });
+    me.on('error', e => {
+        if (done) return;
+        if (e.type === 'peer-unavailable') becomeWaiter(); else matchRetry(1500);   // 待機役がいない → 自分が待機役になる
+    });
+}
+function becomeWaiter() {
+    resetPeer();
+    lobbyMsg('対戦相手を待っています…\n（誰かが「オンライン対戦」を選ぶと始まります）');
+    const qp = qpeer = new Peer(QUEUE_ID);
+    let taken = false;
+    qp.on('error', e => matchRetry(e.type === 'unavailable-id' ? 700 : 1500));   // 先に取られた → 探す側に戻る
+    qp.on('connection', c => {
+        if (taken) { c.on('open', () => c.close()); return; }
+        taken = true;
+        const room = 'spiritarena-' + Math.random().toString(36).slice(2, 8);
+        const host = peer = new Peer(room);
+        host.on('connection', setupConn);
+        host.on('error', () => { taken = false; matchRetry(1000); });
+        host.on('open', () => {
+            const send = () => { c.send({ t:'room', id:room }); setTimeout(() => { try { qp.destroy(); } catch (e) {} if (qpeer === qp) qpeer = null; }, 1500); };
+            c.open ? send() : c.on('open', send);
+            watchdog();
+        });
+    });
+}
 function sayHello() { if (conn && conn.open && !sentHello) { sentHello = true; conn.send({ t:'hello', ch:ch.id }); } }
 function setupConn(c) {
     conn = c;
@@ -318,7 +367,7 @@ function setupConn(c) {
     c.on('data', onData);
     c.on('close', () => {
         if (gameState === "playing") { netNote = "相手が切断しました"; gameState = "clear"; }
-        else if (gameState === "lobby") lobbyMsg('切断されました');
+        else if (gameState === "lobby") { lobbyMsg('切断されました'); if (matching) matchRetry(); }
     });
 }
 function hostRoom() {
@@ -344,6 +393,7 @@ document.getElementById('btnJoin').addEventListener('click', joinRoom);
 document.getElementById('btnBack').addEventListener('click', () => { closeNet(); gameState = "select"; });
 
 function startPvp() {
+    matching = false; clearTimeout(matchTimer);
     showLobby(false);
     Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0 });
     Object.assign(boss, { x:700, y:350, w:30, h:30, vx:0, vy:0 });
@@ -717,7 +767,7 @@ let helpPage = 0;
 const HELP = [
  { t:"あそびかた（1/3）", l:["手の形（グー・チョキ・パー）をカメラに見せて、","精霊と戦うシューティングバトルです。","","・手の形ごとに技が変わり、技はマナを消費します。","・手をカメラから外すと、マナが回復します。","・相手のHPを先に0にすれば勝ち、自分が0なら負け。"] },
  { t:"操作（2/3）", l:["・移動：スティック／十字キーを左右に倒す","・ジャンプ：45度以上、上に倒す","・降りる：足場の上で45度以上、下に倒す","　（倒し続けると、続けて下の足場まで降ります）","・画面のどこを押しても、その場にスティックが出ます","・キーボードは矢印キー／WASD、ゲームパッドも使えます","・ボス戦中は右上の「ポーズ」（Escキー）でキャラ選択に戻れます"] },
- { t:"モード（3/3）", l:["・ボス戦：ひとりで精霊（Lv1〜4）に挑戦。","　レベルが上がるほど強くなります。","・対人戦：タブレット2台で対戦。片方が「ルームを作る」で","　出た4桁コードを、もう片方が入力して接続します。","・キャラは8体。技はキャラごとに違います。","　（キャラ選択の画面にも技の説明が出ます）"] }
+ { t:"モード（3/3）", l:["・ボス戦：ひとりで精霊（Lv1〜4）に挑戦。","　レベルが上がるほど強くなります。","・友達と対戦：片方が「ルームを作る」で出た4桁コードを、","　もう片方が入力して接続します。","・オンライン対戦：ランダムな相手を探して対戦します。","・キャラは8体。技はキャラごとに違います。"] }
 ];
 function drawHelp() {
     const p = HELP[helpPage];
@@ -745,12 +795,12 @@ function drawMode() {
     ctx.textAlign = "center";
     ctx.fillStyle = "#4eef90"; ctx.font = "bold 34px sans-serif";
     ctx.fillText("SPIRIT ARENA 精霊の闘技場", 400, 70);
-    [["1. ボス戦", "ひとりで遊ぶ（CPU）", "#ff9955"], ["2. 対人戦", "タブレット2台で対戦", "#4ea8ff"]].forEach((m, i) => {
-        const x = 60 + i * 370;
-        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, 120, 310, 240);
-        ctx.strokeStyle = m[2]; ctx.lineWidth = 3; ctx.strokeRect(x, 120, 310, 240);
-        ctx.fillStyle = "white"; ctx.font = "bold 30px sans-serif"; ctx.fillText(m[0], x + 155, 220);
-        ctx.font = "16px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(m[1], x + 155, 270);
+    [["1. ボス戦", "ひとりで遊ぶ（CPU）", "#ff9955"], ["2. 友達と対戦", "コードをつないで対戦", "#4ea8ff"], ["3. オンライン対戦", "ランダムな相手と対戦", "#b0a0ff"]].forEach((m, i) => {
+        const x = 25 + i * 258;
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, 120, 240, 240);
+        ctx.strokeStyle = m[2]; ctx.lineWidth = 3; ctx.strokeRect(x, 120, 240, 240);
+        ctx.fillStyle = "white"; ctx.font = "bold 24px sans-serif"; ctx.fillText(m[0], x + 120, 220);
+        ctx.font = "15px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(m[1], x + 120, 270);
     });
     ctx.fillStyle = "#1b2d24"; ctx.fillRect(290, 385, 220, 40);
     ctx.strokeStyle = "#4eef90"; ctx.lineWidth = 2; ctx.strokeRect(290, 385, 220, 40);
