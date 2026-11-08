@@ -6,6 +6,7 @@
 <title>精霊バトル SPIRIT ARENA</title>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.js"></script>
 <style>
 body{margin:0;background:#0c1612;color:#fff;font-family:sans-serif;text-align:center;overflow:hidden}
 #ui{font-size:16px;margin:5px 0;display:flex;justify-content:space-around;background:#16261d;padding:8px 118px 8px 8px}
@@ -15,6 +16,7 @@ canvas{background:linear-gradient(#0a1f2c,#17382c 70%,#22402a);display:block;mar
 button{background:#4eef90;border:none;padding:12px 20px;font-size:18px;font-weight:bold;border-radius:8px;cursor:pointer;color:#12121c;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 button:active{background:#3bc473}
 #stick{position:fixed;left:max(24px,4vw);bottom:max(28px,7vh);width:170px;height:170px;box-sizing:border-box;border-radius:50%;background:rgba(255,255,255,0.10);border:2px solid rgba(255,255,255,0.35);pointer-events:none;z-index:4}
+#auth input{display:block;width:90%;margin:6px auto;font-size:18px;padding:6px;box-sizing:border-box}
 </style>
 </head>
 <body>
@@ -25,6 +27,17 @@ button:active{background:#3bc473}
   <span id="ammo">マナ: 30</span>
 </div>
 <video class="input_video" playsinline muted></video>
+<div id="auth" style="display:none;position:absolute;left:0;right:0;top:80px;margin:0 auto;width:min(420px,92%);background:#1e1e2fee;border:2px solid #4eef90;border-radius:12px;padding:14px;z-index:7">
+  <div id="authMsg" style="font-size:16px;margin-bottom:8px;white-space:pre-line"></div>
+  <div id="authBox">
+    <input id="auName" maxlength="12" placeholder="ニックネーム（新規登録のとき）">
+    <input id="auMail" type="email" placeholder="メールアドレス">
+    <input id="auPass" type="password" placeholder="パスワード（6文字以上）">
+    <button id="btnLogin">ログイン</button> <button id="btnSignup">新規登録</button>
+  </div>
+  <div id="authDone" style="display:none"><button id="btnLogout" style="background:#c66">ログアウト</button></div>
+  <div style="margin-top:8px"><button id="btnAuthClose" style="background:#888">閉じる</button></div>
+</div>
 <div id="lobby" style="display:none;position:absolute;left:0;right:0;top:130px;margin:0 auto;width:min(420px,90%);background:#1e1e2fee;border:2px solid #4eef90;border-radius:12px;padding:14px;z-index:5">
   <div id="lobbyMsg" style="font-size:18px;margin-bottom:10px;white-space:pre-line"></div>
   <div id="rowHost"><button id="btnHost">ルームを作る</button></div>
@@ -40,6 +53,9 @@ button:active{background:#3bc473}
 </div>
 
 <script>
+// ===== サーバー設定（SupabaseのProject URLとanon public keyを入れる。空のままならレートはこの端末だけに保存）=====
+const SUPABASE_URL = '';
+const SUPABASE_ANON_KEY = '';
 const videoElement = document.querySelector('.input_video');
 const canvasElement = document.getElementById('gameCanvas');
 const ctx = canvasElement.getContext('2d');
@@ -124,6 +140,7 @@ function jump() {
 }
 
 window.addEventListener('keydown', e => {
+    if (e.target && e.target.tagName === 'INPUT') return;   // ログイン欄などに入力中
     if ((e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A')) keys.left = true;
     if ((e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D')) keys.right = true;
     if ((e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W')) { e.preventDefault(); if (gameState === "playing") jump(); }
@@ -133,8 +150,8 @@ window.addEventListener('keydown', e => {
         if (gameState === "playing") { gameState = "paused"; stick.x = stick.y = 0; } else if (gameState === "paused") gameState = "playing";
     }
     if (gameState === "mode" && (e.key === 'h' || e.key === 'H')) { helpPage = 0; gameState = "help"; }
-    if (gameState === "help" && e.key === 'Escape') gameState = "mode";
-    if (gameState === "mode" && /^[123]$/.test(e.key)) { pvp = e.key !== '1'; online = e.key === '3'; gameState = "select"; }
+    if ((gameState === "help" || gameState === "ranking") && e.key === 'Escape') gameState = "mode";
+    if (gameState === "mode" && /^[123]$/.test(e.key)) pickMode(+e.key - 1);
     else if (gameState === "select" && /^[1-9]$/.test(e.key)) chooseChar(+e.key - 1);
     else if (gameState === "bossSelect" && /^[1-4]$/.test(e.key)) startGame(+e.key - 1);
     if (gameState === "bossSelect" && e.key === 'Escape') resetGame();
@@ -221,10 +238,14 @@ canvasElement.addEventListener('pointerdown', e => {
     if (gameState === "mode") {
         const r0 = canvasElement.getBoundingClientRect();
         const mx = (e.clientX - r0.left) * 800 / r0.width, my = (e.clientY - r0.top) * 450 / r0.height;
-        if (my > 375) { helpPage = 0; gameState = "help"; return; }      // 「あそびかた」ボタン
+        if (my > 375) {   // 下のボタン：ランキング / あそびかた / ログイン
+            if (mx < 265) openRanking(); else if (mx < 515) { helpPage = 0; gameState = "help"; } else showAuth();
+            return;
+        }
         const idx = mx < 271 ? 0 : mx < 529 ? 1 : 2;
-        pvp = idx > 0; online = idx === 2; gameState = "select"; return;
+        pickMode(idx); return;
     }
+    if (gameState === "ranking") { gameState = "mode"; return; }
     if (gameState === "help") { if (++helpPage >= HELP.length) gameState = "mode"; return; }
     if (gameState !== "select" && gameState !== "bossSelect") return;
     const r = canvasElement.getBoundingClientRect();
@@ -322,17 +343,111 @@ function closeNet() { matching = false; clearTimeout(matchTimer); resetPeer(); s
 let rating = 1000, wins = 0, losses = 0, oppRating = 1000, settled = false, ratingNote = "", abandonNote = "";
 function saveRating() { try { localStorage.setItem('spiritarena-rating', JSON.stringify({ r:rating, w:wins, l:losses })); } catch (e) {} }
 function elo(win, opp) { const ex = 1 / (1 + Math.pow(10, (opp - rating) / 400)); return Math.max(100, Math.round(rating + 32 * ((win ? 1 : 0) - ex))); }
-function settle(win) {   // 試合結果をレートに反映（イロレーティング）
-    settled = true;
+function settleLocal(win) {   // サーバーなし：この端末だけで計算（イロレーティング）
     const old = rating; rating = elo(win, oppRating); win ? wins++ : losses++; saveRating();
     try { localStorage.removeItem('spiritarena-inmatch'); } catch (e) {}
     ratingNote = `レート ${old} → ${rating}（${rating >= old ? '+' : ''}${rating - old}）`;
 }
-try {
-    const d = JSON.parse(localStorage.getItem('spiritarena-rating')); if (d) { rating = d.r; wins = d.w; losses = d.l; }
-    const m = JSON.parse(localStorage.getItem('spiritarena-inmatch'));   // 試合中にページを閉じた → 敗北として記録
-    if (m) { rating = elo(false, m.opp); losses++; saveRating(); localStorage.removeItem('spiritarena-inmatch'); abandonNote = '前回の試合を途中で終えたため、敗北として記録しました'; }
-} catch (e) {}
+function settle(win) {
+    settled = true;
+    if (sb && user && matchId && oppUid) serverSettle(win, matchId, oppUid); else settleLocal(win);
+}
+async function serverSettle(win, mid, ou) {   // 結果を報告 → サーバーが2人の報告の一致を確認してレートを反映
+    const old = rating; ratingNote = '結果を送信中…';
+    try {
+        const { error } = await sb.rpc('report_result', { p_mid: mid, p_opp: ou, p_result: win ? 'win' : 'loss' });
+        if (error) throw error;
+        try { localStorage.removeItem('spiritarena-inmatch'); } catch (e) {}
+        for (let k = 0; k < 6; k++) {   // 相手の報告が届くまで少し待って確認
+            await loadProfile();
+            if (rating !== old) break;
+            await new Promise(r => setTimeout(r, 2000));
+        }
+        ratingNote = rating !== old ? `レート ${old} → ${rating}（${rating >= old ? '+' : ''}${rating - old}）` : '相手の報告待ちです（あとで反映されます）';
+    } catch (e) { ratingNote = '結果の送信に失敗しました'; }
+}
+try { const d = JSON.parse(localStorage.getItem('spiritarena-rating')); if (d) { rating = d.r; wins = d.w; losses = d.l; } } catch (e) {}
+
+// --- アカウント / ランキング（Supabase）---
+const $ = id => document.getElementById(id);
+const sb = (SUPABASE_URL && SUPABASE_ANON_KEY && typeof supabase !== 'undefined') ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+let user = null, myName = '', oppUid = null, matchId = null, isHost = false, rankRows = null, rankMsg = '', myRank = 0;
+async function loadProfile() {
+    const { data } = await sb.from('profiles').select('name,rating,wins,losses').eq('id', user.id).single();
+    if (data) { myName = data.name; rating = data.rating; wins = data.wins; losses = data.losses; }
+}
+async function resolveAbandon() {   // 前回の試合中にページを閉じていたら、敗北として扱う
+    let m = null;
+    try { m = JSON.parse(localStorage.getItem('spiritarena-inmatch')); } catch (e) {}
+    if (!m) return;
+    if (!sb) { rating = elo(false, m.opp); losses++; saveRating(); }
+    else {
+        if (!user) return;   // ログインしたときに処理する
+        if (m.mid && m.uid) await sb.rpc('report_result', { p_mid: m.mid, p_opp: m.uid, p_result: 'loss' });
+        await loadProfile();
+    }
+    try { localStorage.removeItem('spiritarena-inmatch'); } catch (e) {}
+    abandonNote = '前回の試合を途中で終えたため、敗北として記録しました';
+}
+async function initAuth() {
+    if (sb) {
+        const { data } = await sb.auth.getSession();
+        user = data.session ? data.session.user : null;
+        if (user) await loadProfile();
+    }
+    await resolveAbandon();
+}
+function refreshAuthUI(msg) {
+    $('authBox').style.display = user ? 'none' : 'block';
+    $('authDone').style.display = user ? 'block' : 'none';
+    $('authMsg').textContent = msg || (user ? `ログイン中：${myName}\nレート ${rating}（${wins}勝 ${losses}敗）`
+        : sb ? 'ログインすると、レートが保存されてランキングに載ります' : 'サーバーが未設定です（SUPABASE_URL と SUPABASE_ANON_KEY を設定してください）');
+}
+function showAuth(msg) { $('auth').style.display = 'block'; refreshAuthUI(msg); }
+async function doAuth(signup) {
+    if (!sb) return refreshAuthUI();
+    const email = $('auMail').value.trim(), password = $('auPass').value, name = $('auName').value.trim();
+    if (signup && !name) return refreshAuthUI('ニックネームを入力してください');
+    refreshAuthUI('通信中…');
+    const { data, error } = signup ? await sb.auth.signUp({ email, password, options: { data: { name } } })
+                                  : await sb.auth.signInWithPassword({ email, password });
+    if (error) return refreshAuthUI('失敗：' + error.message);
+    if (!data.session) return refreshAuthUI('確認メールを送りました。メールのリンクを開いてから、ログインしてください');
+    user = data.session.user; await loadProfile(); await resolveAbandon(); refreshAuthUI();
+}
+$('btnLogin').addEventListener('click', () => doAuth(false));
+$('btnSignup').addEventListener('click', () => doAuth(true));
+$('btnLogout').addEventListener('click', async () => { if (sb) await sb.auth.signOut(); user = null; myName = ''; rating = 1000; wins = losses = 0; refreshAuthUI(); });
+$('btnAuthClose').addEventListener('click', () => { $('auth').style.display = 'none'; });
+function pickMode(i) {   // オンライン対戦はログインが必要（サーバー設定時）
+    if (i === 2 && sb && !user) { showAuth('オンライン対戦にはログインが必要です'); return; }
+    pvp = i > 0; online = i === 2; gameState = "select";
+}
+async function openRanking() {
+    gameState = "ranking"; rankRows = null; myRank = 0;
+    if (!sb) { rankMsg = 'サーバーが未設定のため、ランキングは使えません'; return; }
+    rankMsg = '読み込み中…';
+    const { data, error } = await sb.from('profiles').select('id,name,rating,wins,losses').order('rating', { ascending:false }).limit(10);
+    if (error) { rankMsg = '取得に失敗しました'; return; }
+    rankRows = data; rankMsg = data.length ? '' : 'まだ誰も登録していません';
+    if (user) { const { count } = await sb.from('profiles').select('id', { count:'exact', head:true }).gt('rating', rating); myRank = (count || 0) + 1; }
+}
+function drawRanking() {
+    ctx.textAlign = "center"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 30px sans-serif"; ctx.fillText("ランキング TOP10", 400, 50);
+    ctx.font = "18px sans-serif";
+    if (rankMsg) { ctx.fillStyle = "#ccc"; ctx.fillText(rankMsg, 400, 200); }
+    (rankRows || []).forEach((r, i) => {
+        const me = user && r.id === user.id, y = 92 + i * 30;
+        ctx.fillStyle = me ? "#4eef90" : "white"; ctx.textAlign = "right"; ctx.fillText(`${i + 1}位`, 190, y);
+        ctx.textAlign = "left"; ctx.fillText(r.name, 210, y);
+        ctx.textAlign = "right"; ctx.fillText(`${r.rating}`, 560, y);
+        ctx.fillStyle = me ? "#4eef90" : "#aaa"; ctx.fillText(`${r.wins}勝 ${r.losses}敗`, 700, y);
+    });
+    ctx.textAlign = "center"; ctx.fillStyle = "#4eef90"; ctx.font = "bold 18px sans-serif";
+    if (user && myRank) ctx.fillText(`あなた：${myRank}位　レート ${rating}`, 400, 415);
+    ctx.fillStyle = "#aaa"; ctx.font = "14px sans-serif"; ctx.fillText("タップでもどる", 400, 438);
+}
+initAuth();
 
 // --- オンライン対戦（レートの近い相手を探す）---
 // レートを150刻みの「帯」に分け、帯ごとに待ち合わせID(QUEUE)を用意。同じ帯→隣の帯…と、時間がたつほど探す範囲を広げる
@@ -350,6 +465,7 @@ function findMatch() {
     if (!matching) return;
     if (typeof Peer === 'undefined') return lobbyMsg('通信ライブラリを読み込めません（ネット接続を確認）');
     resetPeer();
+    isHost = false; matchId = null;
     lobbyMsg(`対戦相手を探しています…\nあなたのレート: ${rating}`);
     const list = candidates(), me = peer = new Peer(), st = { done:false, i:0 };
     const seek = i => {
@@ -376,6 +492,7 @@ function becomeWaiter() {
     qp.on('connection', c => {
         if (taken) { c.on('open', () => c.close()); return; }
         taken = true;
+        isHost = true; matchId = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);   // 試合ID（待機役が決める）
         const room = 'spiritarena-' + Math.random().toString(36).slice(2, 8);
         const host = peer = new Peer(room);
         host.on('connection', setupConn);
@@ -387,7 +504,7 @@ function becomeWaiter() {
         });
     });
 }
-function sayHello() { if (conn && conn.open && !sentHello) { sentHello = true; conn.send({ t:'hello', ch:ch.id, r:rating }); } }
+function sayHello() { if (conn && conn.open && !sentHello) { sentHello = true; conn.send({ t:'hello', ch:ch.id, r:rating, uid:user ? user.id : null, mid:matchId }); } }
 function setupConn(c) {
     conn = c;
     c.on('open', sayHello);
@@ -422,7 +539,7 @@ document.getElementById('btnBack').addEventListener('click', () => { closeNet();
 function startPvp() {
     matching = false; clearTimeout(matchTimer);
     settled = false; ratingNote = "";
-    if (online) try { localStorage.setItem('spiritarena-inmatch', JSON.stringify({ opp:oppRating })); } catch (e) {}
+    if (online) try { localStorage.setItem('spiritarena-inmatch', JSON.stringify({ opp:oppRating, mid:matchId, uid:oppUid })); } catch (e) {}
     showLobby(false);
     Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0 });
     Object.assign(boss, { x:700, y:350, w:30, h:30, vx:0, vy:0 });
@@ -434,7 +551,7 @@ function startPvp() {
 
 function onData(m) {
     if (m.t === 'hello') {
-        oppCh = CHARS.find(c => c.id === m.ch) || CHARS[0]; oppRating = m.r || 1000;
+        oppCh = CHARS.find(c => c.id === m.ch) || CHARS[0]; oppRating = m.r || 1000; oppUid = m.uid || null; if (m.mid && !isHost) matchId = m.mid;
         sayHello();
         if (gameState === "lobby") startPvp();
     } else if (m.t === 's' && gameState === "playing") {
@@ -824,7 +941,7 @@ function drawMode() {
     ctx.textAlign = "center";
     ctx.fillStyle = "#4eef90"; ctx.font = "bold 34px sans-serif";
     ctx.fillText("SPIRIT ARENA 精霊の闘技場", 400, 70);
-    ctx.fillStyle = "#ffe97a"; ctx.font = "16px sans-serif"; ctx.fillText(`オンライン レート ${rating}（${wins}勝 ${losses}敗）`, 400, 98);
+    ctx.fillStyle = "#ffe97a"; ctx.font = "16px sans-serif"; ctx.fillText(`${user ? myName + '　' : ''}オンライン レート ${rating}（${wins}勝 ${losses}敗）`, 400, 98);
     if (abandonNote) { ctx.fillStyle = "#ff9a9a"; ctx.font = "13px sans-serif"; ctx.fillText(abandonNote, 400, 114); }
     [["1. ボス戦", "ひとりで遊ぶ（CPU）", "#ff9955"], ["2. 友達と対戦", "コードをつないで対戦", "#4ea8ff"], ["3. オンライン対戦", "レートの近い相手と対戦", "#b0a0ff"]].forEach((m, i) => {
         const x = 25 + i * 258;
@@ -833,9 +950,11 @@ function drawMode() {
         ctx.fillStyle = "white"; ctx.font = "bold 24px sans-serif"; ctx.fillText(m[0], x + 120, 220);
         ctx.font = "15px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(m[1], x + 120, 270);
     });
-    ctx.fillStyle = "#1b2d24"; ctx.fillRect(290, 385, 220, 40);
-    ctx.strokeStyle = "#4eef90"; ctx.lineWidth = 2; ctx.strokeRect(290, 385, 220, 40);
-    ctx.fillStyle = "white"; ctx.font = "bold 18px sans-serif"; ctx.fillText("？ あそびかた（H）", 400, 412);
+    [[40, "ランキング"], [290, "？ あそびかた（H）"], [540, user ? "アカウント" : "ログイン"]].forEach(([bx, t]) => {
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(bx, 385, 220, 40);
+        ctx.strokeStyle = "#4eef90"; ctx.lineWidth = 2; ctx.strokeRect(bx, 385, 220, 40);
+        ctx.fillStyle = "white"; ctx.font = "bold 18px sans-serif"; ctx.fillText(t, bx + 110, 412);
+    });
 }
 
 // 分身を置く（1体のみ）。ヨミ=影分身(被弾1発) / ゴロー=岩の壁(3発耐える)。ジャンプ中に置くと床まで落下
@@ -901,6 +1020,7 @@ function overlay(title, color, line) {
 function draw() {
     ctx.clearRect(0, 0, 800, 450);
     drawBG(performance.now());
+    if (gameState === "ranking") { drawRanking(); return; }
     if (gameState === "help") { drawHelp(); return; }
     if (gameState === "mode") { drawMode(); return; }
     if (gameState === "lobby") return;
