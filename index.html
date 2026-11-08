@@ -59,7 +59,7 @@ button:active{background:#3bc473}
 <script>
 // ===== サーバー設定（SupabaseのProject URLとanon public keyを入れる。空のままならレートはこの端末だけに保存）=====
 const SUPABASE_URL = '';
-const SUPABASE_ANON_KEY = '';
+const SUPABASE_KEY = '';
 const videoElement = document.querySelector('.input_video');
 const canvasElement = document.getElementById('gameCanvas');
 const ctx = canvasElement.getContext('2d');
@@ -374,7 +374,7 @@ try { const d = JSON.parse(localStorage.getItem('spiritarena-rating')); if (d) {
 
 // --- アカウント / ランキング（Supabase）---
 const $ = id => document.getElementById(id);
-const sb = (SUPABASE_URL && SUPABASE_ANON_KEY && typeof supabase !== 'undefined') ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+const sb = (SUPABASE_URL && SUPABASE_KEY && typeof supabase !== 'undefined') ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 let user = null, myName = '', oppUid = null, matchId = null, isHost = false, rankRows = null, rankMsg = '', myRank = 0;
 async function loadProfile() {
     const { data } = await sb.from('profiles').select('name,rating,wins,losses').eq('id', user.id).single();
@@ -405,7 +405,7 @@ function refreshAuthUI(msg) {
     $('authBox').style.display = user ? 'none' : 'block';
     $('authDone').style.display = user ? 'block' : 'none';
     $('authMsg').textContent = msg || (user ? `ログイン中：${myName}\nレート ${rating}（${wins}勝 ${losses}敗）`
-        : sb ? 'ログインすると、レートが保存されてランキングに載ります' : 'サーバーが未設定です（SUPABASE_URL と SUPABASE_ANON_KEY を設定してください）');
+        : sb ? 'ログインすると、レートが保存されてランキングに載ります' : 'サーバーが未設定です（SUPABASE_URL と SUPABASE_KEY を設定してください）');
 }
 function showAuth(msg) { $('auth').style.display = 'block'; refreshAuthUI(msg); }
 async function doAuth(signup) {
