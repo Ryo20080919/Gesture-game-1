@@ -6,7 +6,7 @@
 <title>精霊バトル SPIRIT ARENA</title>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.111.0/dist/umd/supabase.js"></script>
 <style>
 body{margin:0;background:#0c1612;color:#fff;font-family:sans-serif;text-align:center;overflow:hidden}
 #ui{font-size:16px;margin:5px 0;display:flex;justify-content:space-around;background:#16261d;padding:8px 118px 8px 8px}
@@ -53,9 +53,10 @@ button:active{background:#3bc473}
 </div>
 
 <script>
-// ===== サーバー設定（SupabaseのProject URLとanon public keyを入れる。空のままならレートはこの端末だけに保存）=====
-const SUPABASE_URL = 'https://yrkgwpkzjbkzshamkpps.supabase.co/rest/v1/';
-const SUPABASE_KEY = 'sb_publishable_V5tHBp99Rd4cLQXFuW47Mw_cUOZZeTq';
+// ===== サーバー設定：SupabaseのProject URLと、公開用キー（sb_publishable_… で始まるもの）を入れる =====
+// （空のままなら、レートはこの端末だけに保存されます。sb_secret_… や service_role のキーは絶対に入れないこと）
+const SUPABASE_URL = '';
+const SUPABASE_KEY = '';
 const videoElement = document.querySelector('.input_video');
 const canvasElement = document.getElementById('gameCanvas');
 const ctx = canvasElement.getContext('2d');
@@ -370,7 +371,7 @@ try { const d = JSON.parse(localStorage.getItem('spiritarena-rating')); if (d) {
 
 // --- アカウント / ランキング（Supabase）---
 const $ = id => document.getElementById(id);
-const sb = (SUPABASE_URL && SUPABASE_KEY && typeof supabase !== 'undefined') ? supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+const sb = (SUPABASE_URL && SUPABASE_KEY && typeof supabase !== 'undefined') ? supabase.createClient(SUPABASE_URL, SUPABASE_KEY) : null;
 let user = null, myName = '', oppUid = null, matchId = null, isHost = false, rankRows = null, rankMsg = '', myRank = 0;
 async function loadProfile() {
     const { data } = await sb.from('profiles').select('name,rating,wins,losses').eq('id', user.id).single();
@@ -401,7 +402,7 @@ function refreshAuthUI(msg) {
     $('authBox').style.display = user ? 'none' : 'block';
     $('authDone').style.display = user ? 'block' : 'none';
     $('authMsg').textContent = msg || (user ? `ログイン中：${myName}\nレート ${rating}（${wins}勝 ${losses}敗）`
-        : sb ? 'ログインすると、レートが保存されてランキングに載ります' : 'サーバーが未設定です（SUPABASE_URL と SUPABASE_KEY を設定してください）');
+        : sb ? 'ログインすると、レートが保存されてランキングに載ります' : (SUPABASE_URL && SUPABASE_KEY) ? '通信ライブラリを読み込めませんでした（ネット接続を確認してください）' : 'サーバーが未設定です（SUPABASE_URL と SUPABASE_KEY を設定してください）');
 }
 function showAuth(msg) { $('auth').style.display = 'block'; refreshAuthUI(msg); }
 async function doAuth(signup) {
