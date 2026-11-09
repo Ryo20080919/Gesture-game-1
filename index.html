@@ -15,6 +15,7 @@ canvas{background:linear-gradient(#0a1f2c,#17382c 70%,#22402a);display:block;mar
 button{background:#4eef90;border:none;padding:12px 20px;font-size:18px;font-weight:bold;border-radius:8px;cursor:pointer;color:#12121c;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 button:active{background:#3bc473}
 #stick{position:fixed;left:max(24px,4vw);bottom:max(28px,7vh);width:170px;height:170px;box-sizing:border-box;border-radius:50%;background:rgba(255,255,255,0.10);border:2px solid rgba(255,255,255,0.35);pointer-events:none;z-index:4}
+#namebox input{display:block;width:90%;margin:8px auto;font-size:20px;padding:6px;box-sizing:border-box}
 </style>
 </head>
 <body>
@@ -25,6 +26,11 @@ button:active{background:#3bc473}
   <span id="ammo">マナ: 30</span>
 </div>
 <video class="input_video" playsinline muted></video>
+<div id="namebox" style="display:none;position:absolute;left:0;right:0;top:120px;margin:0 auto;width:min(380px,92%);background:#1e1e2fee;border:2px solid #4eef90;border-radius:12px;padding:14px;z-index:7">
+  <div id="nameMsg" style="font-size:16px;margin-bottom:6px"></div>
+  <input id="nameIn" maxlength="12" placeholder="なまえ">
+  <button id="btnNameSave">決定</button> <button id="btnNameClose" style="background:#888">閉じる</button>
+</div>
 <div id="lobby" style="display:none;position:absolute;left:0;right:0;top:130px;margin:0 auto;width:min(420px,90%);background:#1e1e2fee;border:2px solid #4eef90;border-radius:12px;padding:14px;z-index:5">
   <div id="lobbyMsg" style="font-size:18px;margin-bottom:10px;white-space:pre-line"></div>
   <div id="rowHost"><button id="btnHost">ルームを作る</button></div>
@@ -124,6 +130,7 @@ function jump() {
 }
 
 window.addEventListener('keydown', e => {
+    if (e.target && e.target.tagName === 'INPUT') return;   // 名前などの入力中
     if ((e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A')) keys.left = true;
     if ((e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D')) keys.right = true;
     if ((e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W')) { e.preventDefault(); if (gameState === "playing") jump(); }
@@ -221,7 +228,8 @@ canvasElement.addEventListener('pointerdown', e => {
     if (gameState === "mode") {
         const r0 = canvasElement.getBoundingClientRect();
         const mx = (e.clientX - r0.left) * 800 / r0.width, my = (e.clientY - r0.top) * 450 / r0.height;
-        if (my > 375) { helpPage = 0; gameState = "help"; return; }      // 「あそびかた」ボタン
+        if (my > 80 && my < 120) { showName(); return; }   // 名前の行をタップ → 名前変更
+        if (my > 375) { if (mx < 400) showName(); else { helpPage = 0; gameState = "help"; } return; }   // 下のボタン：名前 / あそびかた
         const idx = mx < 271 ? 0 : mx < 529 ? 1 : 2;
         pvp = idx > 0; online = idx === 2; gameState = "select"; return;
     }
@@ -334,6 +342,24 @@ try {
     if (m) { rating = elo(false, m.opp); losses++; saveRating(); localStorage.removeItem('spiritarena-inmatch'); abandonNote = '前回の試合を途中で終えたため、敗北として記録しました'; }
 } catch (e) {}
 
+// --- 名前（この端末に保存。友達対戦・オンライン対戦で相手に表示される）---
+let localName = '', oppName = '相手';
+try { localName = localStorage.getItem('spiritarena-name') || ''; } catch (e) {}
+const cleanName = v => String(v || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 12);
+function playerName() { return (typeof user !== 'undefined' && user && myName) ? myName : (localName || 'ななし'); }
+function showName() {
+    const locked = typeof user !== 'undefined' && !!user, inp = document.getElementById('nameIn');
+    document.getElementById('nameMsg').textContent = locked ? `ログイン中は、登録したニックネーム「${myName}」が使われます` : '名前を入力してください（12文字まで）';
+    inp.style.display = document.getElementById('btnNameSave').style.display = locked ? 'none' : '';
+    inp.value = localName; document.getElementById('namebox').style.display = 'block';
+}
+document.getElementById('btnNameSave').addEventListener('click', () => {
+    localName = cleanName(document.getElementById('nameIn').value);
+    try { localStorage.setItem('spiritarena-name', localName); } catch (e) {}
+    document.getElementById('namebox').style.display = 'none';
+});
+document.getElementById('btnNameClose').addEventListener('click', () => { document.getElementById('namebox').style.display = 'none'; });
+
 // --- オンライン対戦（レートの近い相手を探す）---
 // レートを150刻みの「帯」に分け、帯ごとに待ち合わせID(QUEUE)を用意。同じ帯→隣の帯…と、時間がたつほど探す範囲を広げる
 const bucketOf = r => Math.floor(r / 150), queueId = b => 'spiritarena-queue-r' + b;
@@ -387,13 +413,13 @@ function becomeWaiter() {
         });
     });
 }
-function sayHello() { if (conn && conn.open && !sentHello) { sentHello = true; conn.send({ t:'hello', ch:ch.id, r:rating }); } }
+function sayHello() { if (conn && conn.open && !sentHello) { sentHello = true; conn.send({ t:'hello', ch:ch.id, r:rating, name:playerName() }); } }
 function setupConn(c) {
     conn = c;
     c.on('open', sayHello);
     c.on('data', onData);
     c.on('close', () => {
-        if (gameState === "playing") { netNote = "相手が切断しました"; gameState = "clear"; }
+        if (gameState === "playing") { netNote = `${oppName}が切断しました`; gameState = "clear"; }
         else if (gameState === "lobby") { lobbyMsg('切断されました'); if (matching) matchRetry(); }
     });
 }
@@ -434,7 +460,7 @@ function startPvp() {
 
 function onData(m) {
     if (m.t === 'hello') {
-        oppCh = CHARS.find(c => c.id === m.ch) || CHARS[0]; oppRating = m.r || 1000;
+        oppCh = CHARS.find(c => c.id === m.ch) || CHARS[0]; oppRating = m.r || 1000; oppName = cleanName(m.name) || '相手';
         sayHello();
         if (gameState === "lobby") startPvp();
     } else if (m.t === 's' && gameState === "playing") {
@@ -703,8 +729,8 @@ function update() {
     }
 
     if (pvp) sendState();
-    setText(pHpEl, `HP: ${player.hp}`);
-    setText(bHpEl, pvp ? `相手 HP: ${opp.hp}` : `精霊 Lv${bossLv + 1} HP: ${boss.hp}`);
+    setText(pHpEl, pvp ? `${playerName()} HP: ${player.hp}` : `HP: ${player.hp}`);
+    setText(bHpEl, pvp ? `${oppName} HP: ${opp.hp}` : `精霊 Lv${bossLv + 1} HP: ${boss.hp}`);
     setText(ammoEl, `マナ: ${ammo}`);
 }
 
@@ -778,6 +804,7 @@ const BSTYLE = { seed:['#9be564',6], leaf:['#4ee68a',4], bomb:['#ff7a3d',9], fra
 function drawOpp() {
     for (const c of opp.c) drawShape(oppCh.shape, 800 - c[0], c[1], 15, oppCh.color, c[2] ? 0.3 + 0.25 * c[3] : 0.55);
     drawShape(oppCh.shape, boss.x, boss.y, 15, oppCh.color, opp.inv > 0 ? 0.6 : 1);
+    ctx.textAlign = "center"; ctx.font = "12px sans-serif"; ctx.fillStyle = "#ffd9b0"; ctx.fillText(oppName, boss.x, boss.y - 28);
     if (opp.rf > 0) {
         ctx.strokeStyle = '#ffb347'; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.arc(boss.x, boss.y, 18 + opp.rf / 6, 0, Math.PI * 2); ctx.stroke();
@@ -824,7 +851,7 @@ function drawMode() {
     ctx.textAlign = "center";
     ctx.fillStyle = "#4eef90"; ctx.font = "bold 34px sans-serif";
     ctx.fillText("SPIRIT ARENA 精霊の闘技場", 400, 70);
-    ctx.fillStyle = "#ffe97a"; ctx.font = "16px sans-serif"; ctx.fillText(`オンライン レート ${rating}（${wins}勝 ${losses}敗）`, 400, 98);
+    ctx.fillStyle = "#ffe97a"; ctx.font = "16px sans-serif"; ctx.fillText(`${playerName()}　オンライン レート ${rating}（${wins}勝 ${losses}敗）  ✎`, 400, 98);
     if (abandonNote) { ctx.fillStyle = "#ff9a9a"; ctx.font = "13px sans-serif"; ctx.fillText(abandonNote, 400, 114); }
     [["1. ボス戦", "ひとりで遊ぶ（CPU）", "#ff9955"], ["2. 友達と対戦", "コードをつないで対戦", "#4ea8ff"], ["3. オンライン対戦", "レートの近い相手と対戦", "#b0a0ff"]].forEach((m, i) => {
         const x = 25 + i * 258;
@@ -833,9 +860,11 @@ function drawMode() {
         ctx.fillStyle = "white"; ctx.font = "bold 24px sans-serif"; ctx.fillText(m[0], x + 120, 220);
         ctx.font = "15px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(m[1], x + 120, 270);
     });
-    ctx.fillStyle = "#1b2d24"; ctx.fillRect(290, 385, 220, 40);
-    ctx.strokeStyle = "#4eef90"; ctx.lineWidth = 2; ctx.strokeRect(290, 385, 220, 40);
-    ctx.fillStyle = "white"; ctx.font = "bold 18px sans-serif"; ctx.fillText("？ あそびかた（H）", 400, 412);
+    [[150, "✎ 名前を変える"], [430, "？ あそびかた（H）"]].forEach(([bx, t]) => {
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(bx, 385, 220, 40);
+        ctx.strokeStyle = "#4eef90"; ctx.lineWidth = 2; ctx.strokeRect(bx, 385, 220, 40);
+        ctx.fillStyle = "white"; ctx.font = "bold 18px sans-serif"; ctx.fillText(t, bx + 110, 412);
+    });
 }
 
 // 分身を置く（1体のみ）。ヨミ=影分身(被弾1発) / ゴロー=岩の壁(3発耐える)。ジャンプ中に置くと床まで落下
@@ -918,6 +947,7 @@ function draw() {
 
     for (const c of clones) drawShape(ch.shape, c.x, c.y, 15, ch.color, c.guard ? 0.3 + 0.25 * c.hits : 0.55);
     drawShape(ch.shape, player.x, player.y, 15, ch.color, player.invuln > 0 ? 0.35 : 1);
+    if (pvp) { ctx.textAlign = "center"; ctx.font = "12px sans-serif"; ctx.fillStyle = "#cfe"; ctx.fillText(playerName(), player.x, player.y - 28); }
     if (player.charge > 0) { // ルナのチャージ
         ctx.strokeStyle = player.charge >= 15 ? '#ffe97a' : '#888'; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.arc(player.x, player.y, 18 + player.charge / 6, 0, Math.PI * 2); ctx.stroke();
@@ -952,8 +982,8 @@ function draw() {
 
     if (online && pvp && !settled && (gameState === "clear" || gameState === "gameover")) settle(gameState === "clear");
     if (gameState === "paused") drawPause();
-    if (gameState === "clear") overlay(pvp ? "YOU WIN!!" : "VICTORY!!", "#4eef90", pvp ? (netNote || "相手を倒しました！") : "精霊を鎮めました！おめでとう！");
-    else if (gameState === "gameover") overlay(pvp ? "YOU LOSE..." : "DEFEAT...", "#ff5555", pvp ? "相手に倒されてしまいました..." : "精霊の力に倒れてしまった...");
+    if (gameState === "clear") overlay(pvp ? "YOU WIN!!" : "VICTORY!!", "#4eef90", pvp ? (netNote || `${oppName}に勝ちました！`) : "精霊を鎮めました！おめでとう！");
+    else if (gameState === "gameover") overlay(pvp ? "YOU LOSE..." : "DEFEAT...", "#ff5555", pvp ? `${oppName}に負けました...` : "精霊の力に倒れてしまった...");
     if (online && pvp && ratingNote && (gameState === "clear" || gameState === "gameover")) {
         ctx.fillStyle = "#ffe97a"; ctx.font = "bold 22px sans-serif"; ctx.textAlign = "center"; ctx.fillText(ratingNote, 400, 340);
     }
