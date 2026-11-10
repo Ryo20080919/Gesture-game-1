@@ -265,10 +265,13 @@ function commitGesture(g) {
     }
 }
 
+const EDGE_MARGIN = 0.1;   // カメラ画面の端から10%以内にある手は読み取らない（手のひらの中心で判定）
+const inFrame = h => { const c = [0, 5, 9, 13, 17].reduce((a, i) => ({ x:a.x + h[i].x / 5, y:a.y + h[i].y / 5 }), { x:0, y:0 });
+                       return c.x > EDGE_MARGIN && c.x < 1 - EDGE_MARGIN && c.y > EDGE_MARGIN && c.y < 1 - EDGE_MARGIN; };
 let nearSize = 0, nearTime = 0;   // 直近で一番近かった手の大きさと時刻
 hands.onResults(results => {
     let g = "No Hand";
-    const lms = results.multiHandLandmarks;
+    const lms = (results.multiHandLandmarks || []).filter(inFrame);   // 画面の端の手は除外
     if (lms && lms.length > 0) {
         // 画面上で一番大きく映っている手 = カメラに一番近い手だけを使う（後ろの手は無視）
         // 大きさは「手首〜中指の付け根」＋「人差し指〜小指の付け根」の長さ（指の開き具合に左右されにくい）
@@ -514,6 +517,13 @@ function processOppBullets() {
     if (player.hp <= 0) { gameState = "gameover"; sendState(true); }
 }
 
+// 技ごとの必要マナ（マナ不足の警告に使う。attack() の消費量と同じ値）
+const COST = {
+    mint:{Rock:1, Scissors:2, Paper:10}, don:{Rock:3, Scissors:4, Paper:8}, hayate:{Rock:1, Scissors:3, Paper:6},
+    yomi:{Rock:1, Scissors:3, Paper:12}, luna:{Rock:3, Scissors:3, Paper:10}, goro:{Rock:2, Scissors:3, Paper:14},
+    rai:{Rock:1, Scissors:2, Paper:12}, mira:{Rock:2, Scissors:3, Paper:8}
+};
+
 // --- キャラ別の攻撃 ---
 function attack() {
     const x = player.x, y = player.y, g = currentGesture, n0 = bullets.length;
@@ -741,7 +751,8 @@ function update() {
     if (pvp) sendState();
     setText(pHpEl, pvp ? `${playerName()} HP: ${player.hp}` : `HP: ${player.hp}`);
     setText(bHpEl, pvp ? `${oppName} HP: ${opp.hp}` : `精霊 Lv${bossLv + 1} HP: ${boss.hp}`);
-    setText(ammoEl, `マナ: ${ammo}`);
+    setText(ammoEl, ammo === 0 ? 'マナ: 0 切れ！' : `マナ: ${ammo}`);
+    ammoEl.style.color = ammo === 0 ? '#ff6b6b' : ammo <= 5 ? '#ffb347' : '';
 }
 
 // ボスの攻撃パターン
@@ -991,6 +1002,21 @@ function draw() {
     ctx.fill();
 
     if (online && pvp && !settled && (gameState === "clear" || gameState === "gameover")) settle(gameState === "clear");
+    if (gameState === "playing" || gameState === "paused") {   // マナゲージ（左上）と、マナ切れ・マナ不足の警告
+        const blink = Math.floor(performance.now() / 250) % 2 === 0;
+        const empty = ammo === 0, low = ammo <= 5;
+        ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(10, 8, 150, 16);
+        ctx.fillStyle = empty ? "#ff4d4d" : low ? "#ffb347" : "#6fd3ff"; ctx.fillRect(12, 10, 146 * ammo / 30, 12);
+        ctx.strokeStyle = empty && blink ? "#ff4d4d" : "rgba(255,255,255,0.5)"; ctx.lineWidth = 2; ctx.strokeRect(10, 8, 150, 16);
+        ctx.textAlign = "left"; ctx.font = "bold 13px sans-serif"; ctx.fillStyle = "white"; ctx.fillText("マナ", 168, 21);
+        if (empty) { ctx.fillStyle = blink ? "#ff6b6b" : "#ffb3b3"; ctx.fillText("マナ切れ！ 手をカメラから外すと回復", 200, 21); }
+        const need = (COST[ch.id] || {})[currentGesture];
+        if (gameState === "playing" && need !== undefined && ammo < need) {   // 出そうとした技のマナが足りない
+            ctx.textAlign = "center"; ctx.font = "bold 16px sans-serif";
+            ctx.fillStyle = blink ? "#ff6b6b" : "#ffd0d0";
+            ctx.fillText(ammo === 0 ? "マナ切れ！" : `マナ不足（${ammo}/${need}）`, player.x, player.y - 46);
+        }
+    }
     if (gameState === "paused") drawPause();
     if (gameState === "clear") overlay(pvp ? "YOU WIN!!" : "VICTORY!!", "#4eef90", pvp ? (netNote || `${oppName}に勝ちました！`) : "精霊を鎮めました！おめでとう！");
     else if (gameState === "gameover") overlay(pvp ? "YOU LOSE..." : "DEFEAT...", "#ff5555", pvp ? `${oppName}に負けました...` : "精霊の力に倒れてしまった...");
