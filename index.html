@@ -265,6 +265,7 @@ function commitGesture(g) {
     }
 }
 
+let nearSize = 0, nearTime = 0;   // 直近で一番近かった手の大きさと時刻
 hands.onResults(results => {
     let g = "No Hand";
     const lms = results.multiHandLandmarks;
@@ -274,6 +275,11 @@ hands.onResults(results => {
         const hsize = h => Math.hypot(h[0].x - h[9].x, h[0].y - h[9].y) + Math.hypot(h[5].x - h[17].x, h[5].y - h[17].y);
         let lm = lms[0];
         for (const h of lms) if (hsize(h) > hsize(lm)) lm = h;
+        // 近い手が0.7秒以内に映っていたのに、今は奥の小さい手しか映っていない（近い手が一瞬検出から外れた）
+        // → 奥の手には切り替えず、近い手の判定を維持する。近い手が来たら、すぐ上書きされる
+        const sz = hsize(lm), now = performance.now();
+        if (sz < nearSize * 0.7 && now - nearTime < 700) return;
+        nearSize = sz; nearTime = now;
         const iOpen = lm[8].y < lm[6].y;
         const mOpen = lm[12].y < lm[10].y;
         const rOpen = lm[16].y < lm[14].y;
