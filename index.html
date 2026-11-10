@@ -69,24 +69,24 @@ let gameState = "mode"; // "mode", "select", "bossSelect", "lobby", "playing", "
 let pvp = false, online = false;        // true = 対人戦
 
 const CHARS = [
- {id:'mint',name:'ミント',shape:'drop',color:'#7be07b',hp:90,speed:2.8,
-  desc:['HP 90','移動 普通','グー/チョキ:弱い弾','パー:弾10でHP+25','(攻撃は控えめ)']},
- {id:'don',name:'ドン',shape:'tri',color:'#ff7a3d',hp:140,speed:2.2,
-  desc:['HP 140','移動 遅い','グー:放物線爆弾','チョキ:時限破片弾','パー:爆弾3連']},
- {id:'hayate',name:'ハヤテ',shape:'dia',color:'#7fe8ff',hp:100,speed:3.2,
-  desc:['HP 100','移動 速い','グー:ブーメラン','チョキ:風刃3連','パー:加速(約4秒)']},
- {id:'yomi',name:'ヨミ',shape:'shuri',color:'#b0a0ff',hp:110,speed:2.8,
-  desc:['HP 110','移動 普通','グー/チョキ:手裏剣','パー:弾12で影分身','(同じ攻撃を真似る)']},
- {id:'luna',name:'ルナ',shape:'moon',color:'#ffe97a',hp:95,speed:2.6,
-  desc:['HP 95','移動 やや遅い','グー長押し:溜め撃ち','チョキ:追尾月光','パー:弾10で流星群']}
+ {id:'mint',name:'ミント',shape:'drop',color:'#7be07b',hp:135,speed:2.8,
+  desc:['HP 135','移動 普通','グー/チョキ:弱い弾','パー:弾10でHP+25','(攻撃は控えめ)']},
+ {id:'don',name:'ドン',shape:'tri',color:'#ff7a3d',hp:210,speed:2.2,
+  desc:['HP 210','移動 遅い','グー:放物線爆弾','チョキ:時限破片弾','パー:爆弾3連']},
+ {id:'hayate',name:'ハヤテ',shape:'dia',color:'#7fe8ff',hp:150,speed:3.2,
+  desc:['HP 150','移動 速い','グー:ブーメラン','チョキ:風刃3連','パー:加速(約4秒)']},
+ {id:'yomi',name:'ヨミ',shape:'shuri',color:'#b0a0ff',hp:165,speed:2.8,
+  desc:['HP 165','移動 普通','グー/チョキ:手裏剣','パー:弾12で影分身','(同じ攻撃を真似る)']},
+ {id:'luna',name:'ルナ',shape:'moon',color:'#ffe97a',hp:145,speed:2.6,
+  desc:['HP 145','移動 やや遅い','グー長押し:溜め撃ち','チョキ:追尾月光','パー:弾10で流星群']}
 ];
 CHARS.push(
- {id:'goro',name:'ゴロー',shape:'rock',color:'#b09070',hp:180,speed:2.0,
-  desc:['HP 180','移動 とても遅い','グー:転がる岩','チョキ:小石散弾','パー:弾14で岩の壁']},
- {id:'rai',name:'ライ',shape:'bolt',color:'#fff06a',hp:100,speed:3.0,
-  desc:['HP 100','移動 やや速い','グー:超高速の稲妻','チョキ:蛇行する稲妻','パー:弾12で落雷']},
- {id:'mira',name:'ミラ',shape:'mirror',color:'#d6c8ff',hp:105,speed:2.8,
-  desc:['HP 105','移動 普通','グー:光線','チョキ:無敵ダッシュ','パー:反射バリア']}
+ {id:'goro',name:'ゴロー',shape:'rock',color:'#b09070',hp:270,speed:2.0,
+  desc:['HP 270','移動 とても遅い','グー:転がる岩','チョキ:小石散弾','パー:弾14で岩の壁']},
+ {id:'rai',name:'ライ',shape:'bolt',color:'#fff06a',hp:150,speed:3.0,
+  desc:['HP 150','移動 やや速い','グー:超高速の稲妻','チョキ:蛇行する稲妻','パー:弾12で落雷']},
+ {id:'mira',name:'ミラ',shape:'mirror',color:'#d6c8ff',hp:160,speed:2.8,
+  desc:['HP 160','移動 普通','グー:光線','チョキ:無敵ダッシュ','パー:反射バリア']}
 );
 let ch = CHARS[0], clones = [];  // 分身リスト（ヨミの影分身 / ゴローの岩の壁）
 
@@ -346,7 +346,7 @@ try {
 let localName = '', oppName = '相手';
 try { localName = localStorage.getItem('spiritarena-name') || ''; } catch (e) {}
 const cleanName = v => String(v || '').replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, 12);
-function playerName() { return (typeof user !== 'undefined' && user && myName) ? myName : (localName || 'ななし'); }
+function playerName() { return (typeof user !== 'undefined' && user && myName) ? myName : (localName || 'No name'); }
 function showName() {
     const locked = typeof user !== 'undefined' && !!user, inp = document.getElementById('nameIn');
     document.getElementById('nameMsg').textContent = locked ? `ログイン中は、登録したニックネーム「${myName}」が使われます` : '名前を入力してください（12文字まで）';
