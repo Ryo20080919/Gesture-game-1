@@ -249,7 +249,7 @@ canvasElement.addEventListener('pointerdown', e => {
 // --- MediaPipe Hands（軽量設定） ---
 const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
 hands.setOptions({
-    maxNumHands: 1,
+    maxNumHands: 3,              // 複数の手を検出し、その中から一番近い手だけを使う
     modelComplexity: 0,          // 1 → 0 : 精度は少し下がるが大幅に軽い
     minDetectionConfidence: 0.6,
     minTrackingConfidence: 0.5
@@ -269,7 +269,11 @@ hands.onResults(results => {
     let g = "No Hand";
     const lms = results.multiHandLandmarks;
     if (lms && lms.length > 0) {
-        const lm = lms[0];
+        // 画面上で一番大きく映っている手 = カメラに一番近い手だけを使う（後ろの手は無視）
+        // 大きさは「手首〜中指の付け根」＋「人差し指〜小指の付け根」の長さ（指の開き具合に左右されにくい）
+        const hsize = h => Math.hypot(h[0].x - h[9].x, h[0].y - h[9].y) + Math.hypot(h[5].x - h[17].x, h[5].y - h[17].y);
+        let lm = lms[0];
+        for (const h of lms) if (hsize(h) > hsize(lm)) lm = h;
         const iOpen = lm[8].y < lm[6].y;
         const mOpen = lm[12].y < lm[10].y;
         const rOpen = lm[16].y < lm[14].y;
