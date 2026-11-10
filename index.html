@@ -14,7 +14,7 @@ canvas{background:linear-gradient(#0a1f2c,#17382c 70%,#22402a);display:block;mar
 #controls{margin-top:10px;display:flex;justify-content:center;gap:10px}
 button{background:#4eef90;border:none;padding:12px 20px;font-size:18px;font-weight:bold;border-radius:8px;cursor:pointer;color:#12121c;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 button:active{background:#3bc473}
-#stick{position:fixed;left:max(24px,4vw);bottom:max(28px,7vh);width:170px;height:170px;box-sizing:border-box;border-radius:50%;background:rgba(255,255,255,0.10);border:2px solid rgba(255,255,255,0.35);pointer-events:none;z-index:4}
+#stick{position:fixed;left:max(24px,4vw);bottom:max(28px,7vh);width:120px;height:120px;box-sizing:border-box;border-radius:50%;background:rgba(255,255,255,0.10);border:2px solid rgba(255,255,255,0.35);pointer-events:none;z-index:4}
 #namebox input{display:block;width:90%;margin:8px auto;font-size:20px;padding:6px;box-sizing:border-box}
 </style>
 </head>
@@ -41,8 +41,8 @@ button:active{background:#3bc473}
 <button id="pauseBtn" style="display:none;position:fixed;top:8px;right:10px;z-index:6;padding:6px 14px;font-size:16px;background:#2c4a34;color:#4eef90;border:2px solid #4eef90"><svg width="16" height="18" viewBox="0 0 16 18" style="vertical-align:-3px;margin-right:7px" aria-hidden="true"><rect x="1" y="1" width="5.5" height="16" rx="1.5" fill="currentColor"/><rect x="9.5" y="1" width="5.5" height="16" rx="1.5" fill="currentColor"/></svg>ポーズ</button>
 <div id="stickZone" style="display:none;position:fixed;left:0;top:0;bottom:0;width:100%;touch-action:none;z-index:3"></div>
 <div id="stick" style="display:none">
-  <svg width="166" height="166" viewBox="0 0 150 150" style="position:absolute;left:0;top:0;pointer-events:none"><line x1="22" y1="22" x2="128" y2="128" stroke="rgba(255,255,255,.25)" stroke-dasharray="4 4"/><line x1="128" y1="22" x2="22" y2="128" stroke="rgba(255,255,255,.25)" stroke-dasharray="4 4"/></svg>
-  <div id="knob" style="position:absolute;left:53px;top:53px;width:60px;height:60px;border-radius:50%;background:rgba(78,239,144,0.55)"></div>
+  <svg width="116" height="116" viewBox="0 0 150 150" style="position:absolute;left:0;top:0;pointer-events:none"><line x1="22" y1="22" x2="128" y2="128" stroke="rgba(255,255,255,.25)" stroke-dasharray="4 4"/><line x1="128" y1="22" x2="22" y2="128" stroke="rgba(255,255,255,.25)" stroke-dasharray="4 4"/></svg>
+  <div id="knob" style="position:absolute;left:36px;top:36px;width:44px;height:44px;border-radius:50%;background:rgba(78,239,144,0.55)"></div>
 </div>
 
 <script>
@@ -70,21 +70,21 @@ let pvp = false, online = false;        // true = 対人戦
 
 const CHARS = [
  {id:'mint',name:'ミント',shape:'drop',color:'#7be07b',hp:135,speed:2.8,
-  desc:['HP 135','移動 普通','グー/チョキ:弱い弾','パー:弾10でHP+25','(攻撃は控えめ)']},
+  desc:['HP 135','移動 普通','グー/チョキ:弱い弾','パー:マナ10でHP+25','(攻撃は控えめ)']},
  {id:'don',name:'ドン',shape:'tri',color:'#ff7a3d',hp:210,speed:2.2,
   desc:['HP 210','移動 遅い','グー:放物線爆弾','チョキ:時限破片弾','パー:爆弾3連']},
  {id:'hayate',name:'ハヤテ',shape:'dia',color:'#7fe8ff',hp:150,speed:3.2,
   desc:['HP 150','移動 速い','グー:ブーメラン','チョキ:風刃3連','パー:加速(約4秒)']},
  {id:'yomi',name:'ヨミ',shape:'shuri',color:'#b0a0ff',hp:165,speed:2.8,
-  desc:['HP 165','移動 普通','グー/チョキ:手裏剣','パー:弾12で影分身','(同じ攻撃を真似る)']},
+  desc:['HP 165','移動 普通','グー/チョキ:手裏剣','パー:マナ12で影分身','(同じ攻撃を真似る)']},
  {id:'luna',name:'ルナ',shape:'moon',color:'#ffe97a',hp:145,speed:2.6,
-  desc:['HP 145','移動 やや遅い','グー長押し:溜め撃ち','チョキ:追尾月光','パー:弾10で流星群']}
+  desc:['HP 145','移動 やや遅い','グー長押し:溜め撃ち','チョキ:追尾月光','パー:マナ10で流星群']}
 ];
 CHARS.push(
  {id:'goro',name:'ゴロー',shape:'rock',color:'#b09070',hp:270,speed:2.0,
-  desc:['HP 270','移動 とても遅い','グー:転がる岩','チョキ:小石散弾','パー:弾14で岩の壁']},
+  desc:['HP 270','移動 とても遅い','グー:転がる岩','チョキ:小石散弾','パー:マナ14で岩の壁']},
  {id:'rai',name:'ライ',shape:'bolt',color:'#fff06a',hp:150,speed:3.0,
-  desc:['HP 150','移動 やや速い','グー:超高速の稲妻','チョキ:蛇行する稲妻','パー:弾12で落雷']},
+  desc:['HP 150','移動 やや速い','グー:超高速の稲妻','チョキ:蛇行する稲妻','パー:マナ12で落雷']},
  {id:'mira',name:'ミラ',shape:'mirror',color:'#d6c8ff',hp:160,speed:2.8,
   desc:['HP 160','移動 普通','グー:光線','チョキ:無敵ダッシュ','パー:反射バリア']}
 );
@@ -158,7 +158,7 @@ let stickVis = false, dropLatch = false;
 const zoneEl = document.getElementById('stickZone'), pauseBtn = document.getElementById('pauseBtn');
 pauseBtn.addEventListener('click', () => { if (gameState === "playing" && !pvp) { gameState = "paused"; stick.x = stick.y = 0; } });
 (() => {
-    const knob = document.getElementById('knob'), R = 62, HALF = 85;
+    const knob = document.getElementById('knob'), R = 44, HALF = 60;
     let pid = null;
     const move = e => {
         const r = stickEl.getBoundingClientRect();
@@ -268,7 +268,7 @@ function commitGesture(g) {
 const EDGE_MARGIN = 0.1;   // カメラ画面の端から10%以内にある手は読み取らない（手のひらの中心で判定）
 const inFrame = h => { const c = [0, 5, 9, 13, 17].reduce((a, i) => ({ x:a.x + h[i].x / 5, y:a.y + h[i].y / 5 }), { x:0, y:0 });
                        return c.x > EDGE_MARGIN && c.x < 1 - EDGE_MARGIN && c.y > EDGE_MARGIN && c.y < 1 - EDGE_MARGIN; };
-let nearSize = 0, nearTime = 0;   // 直近で一番近かった手の大きさと時刻
+let handRef = 0, nearTime = 0, smallSince = 0;   // 自分の手の基準の大きさ / 自分の手を最後に認識した時刻 / 小さい手だけが映り始めた時刻
 hands.onResults(results => {
     let g = "No Hand";
     const lms = (results.multiHandLandmarks || []).filter(inFrame);   // 画面の端の手は除外
@@ -278,11 +278,17 @@ hands.onResults(results => {
         const hsize = h => Math.hypot(h[0].x - h[9].x, h[0].y - h[9].y) + Math.hypot(h[5].x - h[17].x, h[5].y - h[17].y);
         let lm = lms[0];
         for (const h of lms) if (hsize(h) > hsize(lm)) lm = h;
-        // 近い手が0.7秒以内に映っていたのに、今は奥の小さい手しか映っていない（近い手が一瞬検出から外れた）
-        // → 奥の手には切り替えず、近い手の判定を維持する。近い手が来たら、すぐ上書きされる
+        // 自分の手の大きさ(handRef)の6割に満たない手は「後ろの人の手」とみなして無視する
+        // （自分の手が戻ってくれば、大きいのですぐ上書きされる）
         const sz = hsize(lm), now = performance.now();
-        if (sz < nearSize * 0.7 && now - nearTime < 700) return;
-        nearSize = sz; nearTime = now;
+        if (handRef > 0 && sz < handRef * 0.6) {
+            if (now - nearTime < 700) return;                                    // 自分の手が一瞬外れただけ → 直前の判定を維持
+            if (!smallSince) smallSince = now;
+            if (now - smallSince < 6000) { commitGesture("No Hand"); return; }   // 自分の手がない → 後ろの手は無視（マナが回復できる）
+            handRef = sz;                                                        // 6秒以上、小さい手しか映らない → 自分の位置が変わったとみなして基準を取り直す
+        }
+        smallSince = 0; nearTime = now;
+        handRef = handRef ? handRef + (sz - handRef) * (sz > handRef ? 0.5 : 0.05) : sz;   // 基準を更新（大きくは素早く、小さくはゆっくり）
         const iOpen = lm[8].y < lm[6].y;
         const mOpen = lm[12].y < lm[10].y;
         const rOpen = lm[16].y < lm[14].y;
@@ -291,7 +297,7 @@ hands.onResults(results => {
         else if (iOpen && mOpen && !rOpen && !pOpen) g = "Scissors";
         else if (iOpen && mOpen && rOpen && pOpen) g = "Paper";
         else g = "Unknown";
-    }
+    } else smallSince = 0;   // 手が全く映らない
     commitGesture(g);
 });
 
