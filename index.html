@@ -1023,6 +1023,20 @@ function draw() {
             ctx.fillText(ammo === 0 ? "マナ切れ！" : `マナ不足（${ammo}/${need}）`, player.x, player.y - 46);
         }
     }
+    {   // HPバー：左上=自分 / 右上=ボス（対戦では相手）
+        const bar = (x, y, w, cur, max, color) => {
+            const r = Math.max(0, Math.min(1, cur / max));
+            ctx.fillStyle = "rgba(0,0,0,0.45)"; ctx.fillRect(x, y, w, 16);
+            ctx.fillStyle = color || (r > 0.5 ? "#4eef90" : r > 0.25 ? "#ffd84e" : "#ff4d4d"); ctx.fillRect(x + 2, y + 2, (w - 4) * r, 12);
+            ctx.strokeStyle = "rgba(255,255,255,0.5)"; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, 16);
+            ctx.font = "bold 11px sans-serif"; ctx.textAlign = "center"; ctx.fillStyle = "white";
+            ctx.fillText(`${Math.max(0, Math.ceil(cur))}/${max}`, x + w / 2, y + 12);
+        };
+        bar(10, 28, 150, player.hp, ch.hp);
+        ctx.textAlign = "left"; ctx.font = "bold 13px sans-serif"; ctx.fillStyle = "white"; ctx.fillText("HP", 168, 41);
+        bar(640, 8, 150, pvp ? opp.hp : boss.hp, pvp ? oppCh.hp : boss.maxHp, "#ff6b8a");
+        ctx.textAlign = "right"; ctx.fillText(pvp ? oppName : `${BOSSES[bossLv].sub} Lv${bossLv + 1}`, 790, 38);
+    }
     if (gameState === "paused") drawPause();
     if (gameState === "clear") overlay(pvp ? "YOU WIN!!" : "VICTORY!!", "#4eef90", pvp ? (netNote || `${oppName}に勝ちました！`) : "精霊を鎮めました！おめでとう！");
     else if (gameState === "gameover") overlay(pvp ? "YOU LOSE..." : "DEFEAT...", "#ff5555", pvp ? `${oppName}に負けました...` : "精霊の力に倒れてしまった...");
