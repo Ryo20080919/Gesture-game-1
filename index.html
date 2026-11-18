@@ -31,10 +31,11 @@ button:active{background:#3bc473}
 <div id="auth" style="display:none;position:absolute;left:0;right:0;top:80px;margin:0 auto;width:min(420px,92%);background:#1e1e2fee;border:2px solid #4eef90;border-radius:12px;padding:14px;z-index:7">
   <div id="authMsg" style="font-size:16px;margin-bottom:8px;white-space:pre-line"></div>
   <div id="authBox">
-    <input id="auName" maxlength="12" placeholder="ニックネーム（新規登録のとき）">
-    <input id="auMail" type="email" placeholder="メールアドレス">
+    <input id="auName" maxlength="12" placeholder="ニックネーム（表示名・新規登録のとき）">
+    <input id="auMail" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="ユーザー名（英数字3〜20文字）">
     <input id="auPass" type="password" placeholder="パスワード（6文字以上）">
     <button id="btnLogin">ログイン</button> <button id="btnSignup">新規登録</button>
+    <div style="font-size:12px;color:#aaa;margin-top:6px">メールは使いません。パスワードを忘れると、アカウントに戻れません（再設定できません）。</div>
     <div style="margin-top:8px"><button id="btnGuest" style="background:#6fd3ff">ゲストで始める（メール不要）</button></div>
     <div style="font-size:12px;color:#aaa;margin-top:4px">ゲストは、ニックネームだけで始められます。ブラウザのデータを消したり、ログアウトしたりすると、そのアカウントには戻れません。</div>
   </div>
@@ -65,6 +66,8 @@ button:active{background:#3bc473}
 // （空のままなら、レートはこの端末だけに保存されます。sb_secret_… や service_role のキーは絶対に入れないこと）
 const SUPABASE_URL = 'https://yrkgwpkzjbkzshamkpps.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlya2d3cGt6amJrenNoYW1rcHBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQxMTY3NzcsImV4cCI6MjEwOTY5Mjc3N30.yZaabKOPuu3f2O36yS2nZ2Tzpnp9fQvd0bfUN9ls3jk';
+// ユーザー名ログイン用：ユーザー名の後ろに自動で付ける内部ドメイン（実在のメールは使いません。受け付けられない場合は別のドメインに変える）
+const ID_DOMAIN = 'spiritarena-id.com';
 const videoElement = document.querySelector('.input_video');
 const canvasElement = document.getElementById('gameCanvas');
 const ctx = canvasElement.getContext('2d');
@@ -429,19 +432,28 @@ async function initAuth() {
 function refreshAuthUI(msg) {
     $('authBox').style.display = user ? 'none' : 'block';
     $('authDone').style.display = user ? 'block' : 'none';
-    $('authMsg').textContent = msg || (user ? `${user.is_anonymous ? 'ゲスト' : 'ログイン中'}：${myName}\nレート ${rating}（${wins}勝 ${losses}敗）${user.is_anonymous ? '\n※ログアウトやデータ削除で、このアカウントには戻れません' : ''}`
+    $('authMsg').textContent = msg || (user ? `${user.is_anonymous ? 'ゲスト' : 'ログイン中'}：${myName}${user.email ? `（ID ${user.email.split('@')[0]}）` : ''}\nレート ${rating}（${wins}勝 ${losses}敗）${user.is_anonymous ? '\n※ログアウトやデータ削除で、このアカウントには戻れません' : ''}`
         : sb ? 'ログインすると、レートが保存されてランキングに載ります' : (SUPABASE_URL && SUPABASE_KEY) ? '通信ライブラリを読み込めませんでした（ネット接続を確認してください）' : 'サーバーが未設定です（SUPABASE_URL と SUPABASE_KEY を設定してください）');
 }
 function showAuth(msg) { $('auth').style.display = 'block'; refreshAuthUI(msg); }
-async function doAuth(signup) {
+async function doAuth(signup) {   // ユーザー名 + パスワード（内部では「ユーザー名@ID_DOMAIN」をメールとして使う）
     if (!sb) return refreshAuthUI();
-    const email = $('auMail').value.trim(), password = $('auPass').value, name = $('auName').value.trim();
-    if (signup && !name) return refreshAuthUI('ニックネームを入力してください');
+    const uname = $('auMail').value.trim().toLowerCase(), password = $('auPass').value;
+    const name = $('auName').value.trim() || uname;
+    if (!/^[a-z0-9][a-z0-9_-]{2,19}$/.test(uname)) return refreshAuthUI('ユーザー名は、英数字・_・-の3〜20文字で入力してください');
+    if (password.length < 6) return refreshAuthUI('パスワードは6文字以上にしてください');
+    const email = uname + '@' + ID_DOMAIN;
     refreshAuthUI('通信中…');
     const { data, error } = signup ? await sb.auth.signUp({ email, password, options: { data: { name } } })
                                   : await sb.auth.signInWithPassword({ email, password });
-    if (error) return refreshAuthUI('失敗：' + error.message);
-    if (!data.session) return refreshAuthUI('確認メールを送りました。メールのリンクを開いてから、ログインしてください');
+    if (error) {
+        const m = String(error.message || ''), c = error.code || '';
+        if (c === 'user_already_exists' || /already registered/i.test(m)) return refreshAuthUI('このユーザー名は、すでに使われています');
+        if (c === 'invalid_credentials' || /Invalid login credentials/i.test(m)) return refreshAuthUI('ユーザー名かパスワードが違います');
+        if (c === 'email_address_invalid') return refreshAuthUI('内部ドメイン（ID_DOMAIN）が受け付けられませんでした。別のドメインに変えてください');
+        return refreshAuthUI('失敗：' + m + (error.status ? `（${error.status}）` : ''));
+    }
+    if (!data.session) return refreshAuthUI('登録はできましたが、Supabaseの「Confirm email」がオンのためログインできません。オフにしてからログインしてください');
     user = data.session.user; await loadProfile(); await resolveAbandon(); refreshAuthUI();
 }
 async function doGuest() {   // メールなし：ニックネームだけで匿名ログイン
