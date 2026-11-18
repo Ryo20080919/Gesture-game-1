@@ -31,8 +31,7 @@ button:active{background:#3bc473}
 <div id="auth" style="display:none;position:absolute;left:0;right:0;top:80px;margin:0 auto;width:min(420px,92%);background:#1e1e2fee;border:2px solid #4eef90;border-radius:12px;padding:14px;z-index:7">
   <div id="authMsg" style="font-size:16px;margin-bottom:8px;white-space:pre-line"></div>
   <div id="authBox">
-    <input id="auName" maxlength="12" placeholder="ニックネーム（表示名・新規登録のとき）">
-    <input id="auMail" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="ユーザー名（英数字3〜20文字）">
+    <input id="auName" maxlength="12" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="ユーザー名（表示名と同じ・日本語OK・2〜12文字）">
     <input id="auPass" type="password" placeholder="パスワード（6文字以上）">
     <button id="btnLogin">ログイン</button> <button id="btnSignup">新規登録</button>
     <div style="font-size:12px;color:#aaa;margin-top:6px">メールは使いません。パスワードを忘れると、アカウントに戻れません（再設定できません）。</div>
@@ -432,17 +431,30 @@ async function initAuth() {
 function refreshAuthUI(msg) {
     $('authBox').style.display = user ? 'none' : 'block';
     $('authDone').style.display = user ? 'block' : 'none';
-    $('authMsg').textContent = msg || (user ? `${user.is_anonymous ? 'ゲスト' : 'ログイン中'}：${myName}${user.email ? `（ID ${user.email.split('@')[0]}）` : ''}\nレート ${rating}（${wins}勝 ${losses}敗）${user.is_anonymous ? '\n※ログアウトやデータ削除で、このアカウントには戻れません' : ''}`
+    $('authMsg').textContent = msg || (user ? `${user.is_anonymous ? 'ゲスト' : 'ログイン中'}：${myName}\nレート ${rating}（${wins}勝 ${losses}敗）${user.is_anonymous ? '\n※ログアウトやデータ削除で、このアカウントには戻れません' : ''}`
         : sb ? 'ログインすると、レートが保存されてランキングに載ります' : (SUPABASE_URL && SUPABASE_KEY) ? '通信ライブラリを読み込めませんでした（ネット接続を確認してください）' : 'サーバーが未設定です（SUPABASE_URL と SUPABASE_KEY を設定してください）');
 }
 function showAuth(msg) { $('auth').style.display = 'block'; refreshAuthUI(msg); }
-async function doAuth(signup) {   // ユーザー名 + パスワード（内部では「ユーザー名@ID_DOMAIN」をメールとして使う）
+// ユーザー名 = 表示名。内部では「ユーザー名@ID_DOMAIN」をメールとして使う。
+// 英数字（_ -）の名前はそのまま、日本語などは base32 に変換して「u.xxxx@ID_DOMAIN」にする（メールの形式に合わせるため）
+const B32 = 'abcdefghijklmnopqrstuvwxyz234567';
+function b32(bytes) {
+    let bits = 0, val = 0, out = '';
+    for (const b of bytes) {
+        val = (val << 8) | b; bits += 8;
+        while (bits >= 5) { out += B32[(val >>> (bits - 5)) & 31]; bits -= 5; }
+        val &= (1 << bits) - 1;
+    }
+    return bits ? out + B32[(val << (5 - bits)) & 31] : out;
+}
+const normName = v => cleanName(v).normalize('NFKC').toLowerCase();   // 大文字小文字・全角半角の違いは同じ名前として扱う
+const idToEmail = n => (/^[a-z0-9][a-z0-9_-]{1,19}$/.test(n) ? n : 'u.' + b32(new TextEncoder().encode(n))) + '@' + ID_DOMAIN;
+async function doAuth(signup) {
     if (!sb) return refreshAuthUI();
-    const uname = $('auMail').value.trim().toLowerCase(), password = $('auPass').value;
-    const name = $('auName').value.trim() || uname;
-    if (!/^[a-z0-9][a-z0-9_-]{2,19}$/.test(uname)) return refreshAuthUI('ユーザー名は、英数字・_・-の3〜20文字で入力してください');
+    const raw = $('auName').value.trim(), password = $('auPass').value, n = normName(raw);
+    if ([...n].length < 2 || [...raw].length > 12) return refreshAuthUI('ユーザー名は2〜12文字で入力してください（日本語もOK）');
     if (password.length < 6) return refreshAuthUI('パスワードは6文字以上にしてください');
-    const email = uname + '@' + ID_DOMAIN;
+    const email = idToEmail(n), name = cleanName(raw);
     refreshAuthUI('通信中…');
     const { data, error } = signup ? await sb.auth.signUp({ email, password, options: { data: { name } } })
                                   : await sb.auth.signInWithPassword({ email, password });
