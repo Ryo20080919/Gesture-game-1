@@ -641,7 +641,8 @@ function processOppBullets() {
             if (Math.abs(bx - c.x) < 20 && Math.abs(by - c.y) < 20) { if (--c.hits <= 0) clones.splice(k, 1); used = true; break; }
         }
         if (!used && player.reflect > 0 && Math.hypot(bx - player.x, by - player.y) < 40) {
-            bullets.push({x:bx, y:by, vx:0, vy:0, power:18, type:'blaze', life:300, homing:true, spd:6});
+            const ra = Math.atan2(boss.y - by, boss.x - bx);   // 反射した瞬間の相手の位置に向け、そのあとは直進
+            bullets.push({x:bx, y:by, vx:Math.cos(ra) * 6, vy:Math.sin(ra) * 6, power:18, type:'blaze', life:140});
             used = true;
         }
         if (!used && player.invuln <= 0 && Math.abs(bx - player.x) < 20 && Math.abs(by - player.y) < 20) {
@@ -727,7 +728,10 @@ function attack() {
         break;
     case 'luna': // 月：追尾月光と流星群
         if (g === "Scissors" && ammo >= 3) {
-            for (const d of [-1, 1]) F({ y:y + d * 10, vx:0, power:7, type:'moon', homing:true, spd:5, life:300 });
+            for (const d of [-1, 1]) {   // ボスの弾と同じ仕様：撃った瞬間の相手の位置に向け、そのあとは直進
+                const sy = y + d * 10, a = Math.atan2(boss.y - sy, boss.x - x);
+                F({ y:sy, vx:Math.cos(a) * 5, vy:Math.sin(a) * 5, power:7, type:'moon', life:140 });
+            }
             ammo -= 3; shotCooldown = 34;
         } else if (g === "Paper" && ammo >= 10) {
             for (let k = -2; k <= 2; k++) bullets.push({ x:boss.x + k * 38, y:-10, vx:0, vy:5, power:13, type:'meteor', life:140 });
@@ -831,7 +835,8 @@ function update() {
 
         if (hitClone(bb)) { bossBullets.splice(i, 1); continue; } // 分身に当たった弾は消える
         if (player.reflect > 0 && Math.hypot(bb.x - player.x, bb.y - player.y) < 40) {
-            bullets.push({x:bb.x, y:bb.y, vx:0, vy:0, power:18, type:'blaze', life:300, homing:true, spd:6});
+            const ra = Math.atan2(boss.y - bb.y, boss.x - bb.x);   // 反射した瞬間の相手の位置に向け、そのあとは直進
+            bullets.push({x:bb.x, y:bb.y, vx:Math.cos(ra) * 6, vy:Math.sin(ra) * 6, power:18, type:'blaze', life:140});
             bossBullets.splice(i, 1);
             continue;
         }
