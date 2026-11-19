@@ -534,10 +534,10 @@ document.getElementById('btnNameClose').addEventListener('click', () => { docume
 // レートを150刻みの「帯」に分け、帯ごとに待ち合わせID(QUEUE)を用意。同じ帯→隣の帯…と、時間がたつほど探す範囲を広げる
 const bucketOf = r => Math.floor(r / 150), queueId = b => 'spiritarena-queue-r' + b;
 let matchStart = 0;
-function matchRetry(ms) { if (!matching) return; clearTimeout(matchTimer); matchTimer = setTimeout(findMatch, ms || 600 + Math.random() * 1200); }
-function watchdog() { setTimeout(() => { if (matching && gameState === "lobby") findMatch(); }, 12000); }   // つながらなければ探し直す
+function matchRetry(ms) { if (!matching) return; clearTimeout(matchTimer); matchTimer = setTimeout(findMatch, ms || 300 + Math.random() * 600); }
+function watchdog() { setTimeout(() => { if (matching && gameState === "lobby") findMatch(); }, 8000); }   // つながらなければ探し直す
 function candidates() {
-    const el = Date.now() - matchStart, range = el < 15000 ? 0 : el < 35000 ? 1 : el < 60000 ? 2 : 10;   // 15秒/35秒/60秒で範囲を広げる
+    const el = Date.now() - matchStart, range = el < 4000 ? 0 : el < 8000 ? 1 : el < 15000 ? 2 : el < 25000 ? 4 : 10;   // 4秒/8秒/15秒/25秒で探す範囲を広げる
     const b = bucketOf(rating), list = [b];
     for (let d = 1; d <= range; d++) list.push(b - d, b + d);   // 近い帯から順に
     return list.filter(x => x >= 0);
@@ -548,17 +548,15 @@ function findMatch() {
     resetPeer();
     isHost = false; matchId = null;
     lobbyMsg(`対戦相手を探しています…\nあなたのレート: ${rating}`);
-    const list = candidates(), me = peer = new Peer(), st = { done:false, i:0 };
-    const seek = i => {
-        if (!matching) return;
-        if (i >= list.length) return becomeWaiter();           // 誰も待っていない → 自分が待機役になる
-        st.i = i;
-        const q = me.connect(queueId(list[i]));
+    const list = candidates(), me = peer = new Peer(), st = { done:false, fails:0 };
+    const fail = () => { if (!st.done && ++st.fails >= list.length) becomeWaiter(); };   // 全部の帯に誰もいなかった → 自分が待機役になる
+    me.on('open', () => list.forEach((b, i) => setTimeout(() => {   // 近い帯から、少しずつずらして「同時に」当たってみる（1つずつ順番に待たない）
+        if (!matching || st.done || peer !== me) return;
+        const q = me.connect(queueId(b));
         q.on('data', m => { if (m.t === 'room' && !st.done) { st.done = true; setupConn(me.connect(m.id)); q.close(); watchdog(); } });
-        q.on('close', () => { if (!st.done && st.i === i) matchRetry(); });
-    };
-    me.on('open', () => seek(0));
-    me.on('error', e => { if (st.done) return; if (e.type === 'peer-unavailable') seek(st.i + 1); else matchRetry(1500); });
+        q.on('close', () => fail());
+    }, i * 80)));
+    me.on('error', e => { if (st.done) return; if (e.type === 'peer-unavailable') fail(); else matchRetry(1500); });
 }
 function becomeWaiter() {
     resetPeer();
@@ -568,7 +566,7 @@ function becomeWaiter() {
     qp.on('error', e => matchRetry(e.type === 'unavailable-id' ? 700 : 1500));   // 先に取られた → 探す側に戻る
     qp.on('open', () => {   // 待ち続けず、一定時間で探す範囲を広げて探し直す
         clearTimeout(matchTimer);
-        matchTimer = setTimeout(() => { if (matching && gameState === "lobby" && !taken) findMatch(); }, 9000 + Math.random() * 4000);
+        matchTimer = setTimeout(() => { if (matching && gameState === "lobby" && !taken) findMatch(); }, 3500 + Math.random() * 2500);
     });
     qp.on('connection', c => {
         if (taken) { c.on('open', () => c.close()); return; }
