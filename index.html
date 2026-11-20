@@ -164,10 +164,13 @@ window.addEventListener('keydown', e => {
     }
     if (gameState === "mode" && (e.key === 'h' || e.key === 'H')) { helpPage = 0; gameState = "help"; }
     if ((gameState === "help" || gameState === "ranking") && e.key === 'Escape') gameState = "mode";
-    if (gameState === "mode" && /^[123]$/.test(e.key)) pickMode(+e.key - 1);
+    if (gameState === "mode" && /^[1234]$/.test(e.key)) pickMode(+e.key - 1);
     else if (gameState === "select" && /^[1-9]$/.test(e.key)) chooseChar(+e.key - 1);
     else if (gameState === "bossSelect" && /^[1-4]$/.test(e.key)) startGame(+e.key - 1);
     if (gameState === "bossSelect" && e.key === 'Escape') resetGame();
+    if (gameState === "storySelect" && e.key === 'Escape') gameState = "select";
+    if (gameState === "storyIntro" && e.key === 'Escape') gameState = "storySelect";
+    if (gameState === "storySelect" && /^[1-6]$/.test(e.key) && +e.key - 1 <= storyProg) { storyStage = +e.key - 1; gameState = "storyIntro"; }
 });
 window.addEventListener('blur', () => { keys.left = keys.right = false; });
 window.addEventListener('keyup', e => {
@@ -229,7 +232,8 @@ function pollInput() {
 
 function resetGame() { // ボス戦→キャラ選択へ / 対人戦→モード選択へ
     bullets = []; bossBullets = []; clones = [];
-    if (pvp) { closeNet(); pvp = false; gameState = "mode"; } else gameState = "select";
+    marks = []; sched = []; laser = null;
+    if (pvp) { closeNet(); pvp = false; gameState = "mode"; } else gameState = story ? "storySelect" : "select";   // ストーリーはステージ選択へ
 }
 function chooseChar(i) {
     if (!CHARS[i]) return;
@@ -239,7 +243,7 @@ function chooseChar(i) {
         mySelected = true; sentHello = false; sayHello();
         if (oppReady) startPvp(); else { gameState = "lobby"; showLobby(true); }
     } else if (pvp) { gameState = "lobby"; showLobby(true); if (online) { matching = true; matchStart = Date.now(); settled = false; findMatch(); } }
-    else gameState = "bossSelect";
+    else gameState = story ? "storySelect" : "bossSelect";
 }
 function startGame(lv) {
     bossLv = lv; bossCfg = BOSSES[lv];
@@ -270,9 +274,11 @@ canvasElement.addEventListener('pointerdown', e => {
             if (mx < 265) openRanking(); else if (mx < 515) { helpPage = 0; gameState = "help"; } else showAuth();
             return;
         }
-        const idx = mx < 271 ? 0 : mx < 529 ? 1 : 2;
+        const idx = Math.max(0, Math.min(3, Math.floor((mx - 8) / 195)));
         pickMode(idx); return;
     }
+    if (gameState === "storyIntro") { startStory(storyStage); return; }
+    if (gameState === "storySelect") { storySelectTap(e); return; }
     if (gameState === "ranking") { gameState = "mode"; return; }
     if (gameState === "help") { if (++helpPage >= HELP.length) gameState = "mode"; return; }
     if (gameState !== "select" && gameState !== "bossSelect") return;
@@ -502,7 +508,7 @@ $('btnLogout').addEventListener('click', async () => { if (sb) await sb.auth.sig
 $('btnAuthClose').addEventListener('click', () => { $('auth').style.display = 'none'; });
 function pickMode(i) {   // オンライン対戦はログインが必要（サーバー設定時）
     if (i === 2 && sb && !user) { showAuth('オンライン対戦にはログインが必要です'); return; }
-    pvp = i > 0; online = i === 2; gameState = "select";
+    pvp = i === 1 || i === 2; online = i === 2; story = i === 3 ? {} : null; gameState = "select";
 }
 async function openRanking() {
     gameState = "ranking"; rankRows = null; myRank = 0;
@@ -820,6 +826,7 @@ function update() {
     if (player.x > 385) player.x = 385;
 
     if (!pvp) {
+    if (bossCfg.move) { bossCfg.move(); } else {   // ストーリーの敵は専用の動き
     boss.moveTimer++;
     if (boss.moveTimer > bossCfg.moveInt) {
         // chase>0 のボスは中央（プレイヤー側）へ寄りやすく、プレイヤーが高所にいると飛び上がる
@@ -839,6 +846,7 @@ function update() {
     if (boss.x < 415) { boss.x = 415; boss.vx *= -1; }
     if (boss.x > 785) { boss.x = 785; boss.vx *= -1; }
     }
+    }
 
     player.isGround = false;
     boss.isGround = false;
@@ -851,7 +859,7 @@ function update() {
         }
         const bBottom = boss.y + boss.h/2, bPrev = bBottom - boss.vy;
         if (p === boss.dropPlat && bBottom > p.y + 20) boss.dropPlat = null;
-        if (!pvp && p !== boss.dropPlat && boss.x + boss.w/2 > p.x && boss.x - boss.w/2 < p.x + p.w &&
+        if (!pvp && !bossCfg.noPlat && p !== boss.dropPlat && boss.x + boss.w/2 > p.x && boss.x - boss.w/2 < p.x + p.w &&
             bBottom >= p.y && bPrev <= p.y + 5 && boss.vy >= 0) {
             boss.y = p.y - boss.h/2; boss.vy = 0; boss.isGround = true; boss.standing = p;
         }
@@ -872,12 +880,17 @@ function update() {
         }
     }
 
+    if (story && !pvp) storyTick();
     // ボスの攻撃
     if (!pvp) {
     if (++bossShootCooldown > bossCfg.shootInt) { bossShoot(); bossShootCooldown = 0; }
     for (let i = bossBullets.length - 1; i >= 0; i--) {
         const bb = bossBullets[i];
         bb.life--;
+        if (bb.vx !== undefined) {   // 速度で動く弾（雨・衝撃波・放物線・はねる弾）
+            bb.x += bb.vx; bb.y += bb.vy; if (bb.grav) bb.vy += bb.grav;
+            if (bb.bounce && bb.y > 392 && bb.vy > 0) { bb.vy *= -0.8; bb.bounce--; }
+        } else {
         const t = clones.find(c => c.guard) || player; // 盾の分身があれば狙う
         if (bb.turn && Math.hypot(t.x - bb.x, t.y - bb.y) < 130) bb.turn = 0; // 当たる少し前で追尾をやめ、以降は直進
         let diff = Math.atan2(t.y - bb.y, t.x - bb.x) - bb.angle;
@@ -886,6 +899,7 @@ function update() {
         bb.angle += diff * bb.turn;
         bb.x += Math.cos(bb.angle) * bb.speed;
         bb.y += Math.sin(bb.angle) * bb.speed;
+        }
 
         if (hitClone(bb)) { bossBullets.splice(i, 1); continue; } // 分身に当たった弾は消える
         if (player.reflect > 0 && Math.hypot(bb.x - player.x, bb.y - player.y) < 40) {
@@ -894,13 +908,13 @@ function update() {
             bossBullets.splice(i, 1);
             continue;
         }
-        if (player.invuln <= 0 && Math.abs(bb.x - player.x) < 20 && Math.abs(bb.y - player.y) < 20) {
-            player.hp -= 15;
+        if (player.invuln <= 0 && Math.abs(bb.x - player.x) < (bb.hw || 5) + 15 && Math.abs(bb.y - player.y) < (bb.hh || 5) + 15) {
+            player.hp -= bb.dmg || 15;
             bossBullets.splice(i, 1);
             if (player.hp <= 0) { player.hp = 0; gameState = "gameover"; }
             continue;
         }
-        if (bb.life <= 0 || bb.x < 0 || bb.x > 800 || bb.y < 0 || bb.y > 450) bossBullets.splice(i, 1);
+        if (bb.life <= 0 || bb.x < -40 || bb.x > 840 || bb.y < -60 || bb.y > 450) bossBullets.splice(i, 1);
     }
     }
 
@@ -932,9 +946,12 @@ function update() {
 
         if (!pvp && b.x > boss.x - boss.w/2 && b.x < boss.x + boss.w/2 &&
             b.y > boss.y - boss.h/2 && b.y < boss.y + boss.h/2) {
-            if (!b.hit) { // 貫通弾は1発につき1回だけダメージ
-                boss.hp -= b.power; b.hit = true;
-                if (boss.hp <= 0) { boss.hp = 0; gameState = "clear"; }
+            if (!b.hit) { // 貫通弾は1発につき1回だけダメージ（シールド中は無効）
+                b.hit = true;
+                if (!boss.shield) {
+                    boss.hp -= b.power;
+                    if (boss.hp <= 0) { boss.hp = 0; gameState = "clear"; if (story) storyCleared(); }
+                }
             }
             if (!b.pierce) bullets.splice(i, 1);
             continue;
@@ -944,13 +961,14 @@ function update() {
 
     if (pvp) sendState();
     setText(pHpEl, pvp ? `${playerName()} HP: ${player.hp}` : `HP: ${player.hp}`);
-    setText(bHpEl, pvp ? `${oppName} HP: ${opp.hp}` : `精霊 Lv${bossLv + 1} HP: ${boss.hp}`);
+    setText(bHpEl, pvp ? `${oppName} HP: ${opp.hp}` : (story ? `${bossCfg.name} HP: ${boss.hp}` : `精霊 Lv${bossLv + 1} HP: ${boss.hp}`));
     setText(ammoEl, ammo === 0 ? 'マナ: 0 切れ！' : `マナ: ${ammo}`);
     ammoEl.style.color = ammo === 0 ? '#ff6b6b' : ammo <= 5 ? '#ffb347' : '';
 }
 
 // ボスの攻撃パターン
 function bossShoot() {
+    if (bossCfg.atk) { bossCfg.atk(++boss.atk); return; }   // ストーリーの敵は専用の攻撃
     const a = Math.atan2(player.y - boss.y, player.x - boss.x);
     const mk = (ang, sp, turn) => bossBullets.push({ x:boss.x, y:boss.y, speed:sp, angle:ang, life:300, turn:0 }); // 追尾なし：発射時にプレイヤーへ向け、あとは直進
     const n = ++boss.atk;
@@ -1036,9 +1054,10 @@ function drawOpp() {
 
 let helpPage = 0;
 const HELP = [
- { t:"あそびかた（1/3）", l:["手の形（グー・チョキ・パー）をカメラに見せて、","精霊と戦うシューティングバトルです。","","・手の形ごとに技が変わり、技はマナを消費します。","・手をカメラから外すと、マナが回復します。","・相手のHPを先に0にすれば勝ち、自分が0なら負け。"] },
- { t:"操作（2/3）", l:["・移動：スティック／十字キーを左右に倒す","・ジャンプ：45度以上、上に倒す","・降りる：足場の上で45度以上、下に倒す","　（倒し続けると、続けて下の足場まで降ります）","・画面のどこを押しても、その場にスティックが出ます","・キーボードは矢印キー／WASD、ゲームパッドも使えます","・ボス戦中は右上の「ポーズ」（Escキー）でキャラ選択に戻れます"] },
- { t:"モード（3/3）", l:["・ボス戦：ひとりで精霊（Lv1〜4）に挑戦。","　レベルが上がるほど強くなります。","・友達と対戦：片方が「ルームを作る」で出た4桁コードを、","　もう片方が入力して接続します。","　終わったあとも部屋に残り、「もう一度対戦」か「ルームを出る」を選べます。","・オンライン対戦：レートの近い相手を探して対戦します。","　勝つとレートが上がり、負けると下がります。","・キャラは8体。技はキャラごとに違います。"] }
+ { t:"あそびかた（1/4）", l:["手の形（グー・チョキ・パー）をカメラに見せて、","精霊と戦うシューティングバトルです。","","・手の形ごとに技が変わり、技はマナを消費します。","・手をカメラから外すと、マナが回復します。","・相手のHPを先に0にすれば勝ち、自分が0なら負け。"] },
+ { t:"操作（2/4）", l:["・移動：スティック／十字キーを左右に倒す","・ジャンプ：45度以上、上に倒す","・降りる：足場の上で45度以上、下に倒す","　（倒し続けると、続けて下の足場まで降ります）","・画面のどこを押しても、その場にスティックが出ます","・キーボードは矢印キー／WASD、ゲームパッドも使えます","・ボス戦中は右上の「ポーズ」（Escキー）でキャラ選択に戻れます"] },
+ { t:"モード（3/4）", l:["・ボス戦：ひとりで精霊（Lv1〜4）に挑戦。","　レベルが上がるほど強くなります。","・友達と対戦：片方が「ルームを作る」で出た4桁コードを、","　もう片方が入力して接続します。","　終わったあとも部屋に残り、「もう一度対戦」か「ルームを出る」を選べます。","・オンライン対戦：レートの近い相手を探して対戦します。","　勝つとレートが上がり、負けると下がります。","・キャラは8体。技はキャラごとに違います。"] },
+ { t:"ストーリー（4/4）", l:["・ステージ1-1から順に、新しい敵に挑みます。","・敵を倒すと、次のステージが解放されます。","・敵ごとに動きと攻撃がまったく違います。","　（光の雨・衝撃波・瞬間移動・つらら・シールド…）","・進み具合は、この端末に保存されます。","・操作はボス戦と同じで、キャラも自由に選べます。"] }
 ];
 function drawHelp() {
     const p = HELP[helpPage];
@@ -1055,11 +1074,151 @@ function drawPause() {
     ctx.textAlign = "center"; ctx.fillStyle = "white"; ctx.font = "bold 40px sans-serif"; ctx.fillText("ポーズ中", 400, 150);
     const tw = ctx.measureText("ポーズ中").width, bx = 400 - tw / 2 - 48;   // 太い2本線のポーズマーク
     ctx.fillStyle = "#4eef90"; ctx.fillRect(bx, 120, 13, 36); ctx.fillRect(bx + 22, 120, 13, 36);
-    [["✦ 再開", 200], ["キャラ選択へ", 270]].forEach(([t, y]) => {
+    [["✦ 再開", 200], [story ? "ステージ選択へ" : "キャラ選択へ", 270]].forEach(([t, y]) => {
         ctx.fillStyle = "#1b2d24"; ctx.fillRect(250, y, 300, 52);
         ctx.strokeStyle = "#4eef90"; ctx.lineWidth = 2; ctx.strokeRect(250, y, 300, 52);
         ctx.fillStyle = "white"; ctx.font = "bold 22px sans-serif"; ctx.fillText(t, 400, y + 34);
     });
+}
+
+// ===== ストーリーモード =====
+// ステージ 1-1〜2-3。各ステージに、既存の4体とは全く違う動き・攻撃の敵がいる。進み具合はこの端末に保存。
+let story = null, storyProg = 0, storyStage = 0, marks = [], sched = [], laser = null;
+try { storyProg = +localStorage.getItem('spiritarena-story') || 0; } catch (e) {}
+const later = (t, fn) => sched.push({ t, fn });                               // 少しあとに実行（予告→攻撃に使う）
+const bb_ = o => bossBullets.push(Object.assign({ life:500, r:6, color:'#ff33ff' }, o));   // 敵の弾を追加
+const aimAng = () => Math.atan2(player.y - boss.y, player.x - boss.x);
+const clampX = x => Math.max(20, Math.min(380, x));
+const rainAt = (x, delay, vy, dmg, color) => {   // 床に赤い印 → 少しあとに、その真上から落ちてくる
+    marks.push({ x:x - 18, y:394, w:36, h:6, t:delay, max:delay });
+    later(delay, () => bb_({ x, y:-10, vx:0, vy, r:8, color, dmg }));
+};
+const STAGES = [
+ { id:'1-1', name:'ルシ', title:'蛍の精', color:'#c8ff7a', pts:10, spiky:true, size:38, hp:420, hover:true, noPlat:true, shootInt:80,
+   blurb:['森の奥で、ひとつの光がゆれている。', '近づく者に、光の雨を降らせるという…'],
+   move() { boss.vx = boss.vy = 0; boss.x = 620 + Math.sin(boss.t / 55) * 110; boss.y = 150 + Math.sin(boss.t / 37) * 45; },   // ふわふわ飛び回る
+   atk(n) {
+       if (n % 3) { for (const d of [-60, 0, 60]) rainAt(clampX(player.x + d), 45, 5.5, 15, '#fff27a'); }   // 光の雨：プレイヤーの頭上
+       else { const a = aimAng(); for (const k of [-1, 0, 1]) bb_({ x:boss.x, y:boss.y, speed:2.2, angle:a + k * 0.22, turn:0, color:'#c8ff7a' }); }
+   } },
+ { id:'1-2', name:'ガニマル', title:'岩蟹', color:'#c9935f', pts:6, spiky:false, size:46, hp:650, moveInt:70, moveSpd:3, chase:0.6, jump:-8.5, jumpP:0.25, shootInt:85,
+   blurb:['川辺の岩が、ゆっくり動き出した。', '甲羅の石を飛ばし、地面を揺らしてくる！'],
+   atk(n) {
+       if (n % 3 === 0) bb_({ x:boss.x, y:388, vx:-3.1, vy:0, hw:16, hh:12, w:32, h:24, color:'#ff9a4d', dmg:20, life:400 });   // 地ならし：床を走る衝撃波（ジャンプでよける）
+       else { const T = 65, g = 0.13; bb_({ x:boss.x, y:boss.y, vx:(player.x - boss.x) / T, vy:(player.y - boss.y) / T - 0.5 * g * T, grav:g, r:10, color:'#c9935f', dmg:18, life:300 }); }   // 放物線の石つぶて
+   } },
+ { id:'1-3', name:'カゲロウ', title:'影狐', color:'#ff9ec4', pts:3, spiky:true, size:40, hp:780, hover:true, noPlat:true, shootInt:50,
+   blurb:['月夜に、影だけが走り回っている。', '光ったと思えば、もう別の場所にいる…'],
+   move() {   // 約1.7秒ごとに、直前に光って瞬間移動
+       boss.vx = boss.vy = 0; const ph = boss.t % 100;
+       if (ph === 80) boss.flash = 20;
+       if (ph === 99) { const ps = platforms.filter(p => p.x >= 400 && p.y < 400); const p = ps[(Math.random() * ps.length) | 0]; boss.x = p.x + p.w / 2; boss.y = p.y - boss.h / 2; }
+   },
+   atk() { const a = aimAng(); for (const d of [-0.2, 0, 0.2]) bb_({ x:boss.x, y:boss.y, speed:4.4, angle:a + d, turn:0, r:5, color:'#ff7fb0' }); } },
+ { id:'2-1', name:'ツララ', title:'氷の女王', color:'#9fe8ff', pts:6, spiky:true, size:44, hp:950, hover:true, noPlat:true, shootInt:75,
+   blurb:['凍てつく峰に、氷の女王が待っている。', '天井から、つららが降りそそぐ！'],
+   move() { boss.vx = boss.vy = 0; boss.x = 640 + Math.sin(boss.t / 70) * 90; boss.y = 190 + Math.sin(boss.t / 45) * 30; },
+   atk(n) {
+       if (n % 2) { for (let k = 0; k < 5; k++) rainAt(clampX(40 + k * 80 + Math.random() * 30 - 15), 50, 7.5, 18, '#bff3ff'); }   // つらら雨：すき間を見つけてよける
+       else { for (const d of [-0.25, 0, 0.25]) { const a = aimAng() + d; bb_({ x:boss.x, y:boss.y, vx:Math.cos(a) * 3.2, vy:Math.sin(a) * 3.2 - 1, grav:0.07, bounce:1, r:8, color:'#9fe8ff', dmg:16, life:420 }); } }   // 床で1回はねる氷弾
+   } },
+ { id:'2-2', name:'ミラージュ', title:'鏡の魔人', color:'#d6c8ff', pts:8, spiky:false, size:46, hp:1100, hover:true, noPlat:true,
+   get shootInt() { return boss.shield ? 6 : 50; },
+   blurb:['鏡の迷宮で、魔人がほほえんでいる。', '身を守るときは、どんな攻撃も通さない…'],
+   move() { boss.vx = boss.vy = 0; boss.x = 620 + Math.sin(boss.t / 80) * 100; boss.y = 230 + Math.sin(boss.t / 60) * 20; boss.shield = boss.t % 420 >= 230; },   // 約4秒は攻撃が通り、約3秒はシールドで無効
+   atk() {
+       if (boss.shield) { const a = boss.t * 0.17; for (const o of [0, Math.PI]) bb_({ x:boss.x, y:boss.y, speed:2.6, angle:a + o, turn:0, r:5, color:'#e6dcff' }); }   // シールド中：うずまき弾
+       else { const a = aimAng(); for (let k = -2; k <= 2; k++) bb_({ x:boss.x, y:boss.y, speed:3.4, angle:a + k * 0.16, turn:0, color:'#d6c8ff' }); }
+   } },
+ { id:'2-3', name:'スターヴ', title:'星喰らいの竜', color:'#ffd24d', pts:12, spiky:true, size:58, hp:1900, hover:true, noPlat:true, last:true,
+   get phase() { return boss.hp > boss.maxHp * 0.6 ? 1 : boss.hp > boss.maxHp * 0.3 ? 2 : 3; },
+   get shootInt() { return [0, 70, 58, 46][this.phase]; },
+   blurb:['夜空の星を食らう竜が、最後の敵だ。', '力を取り戻すほど、攻撃は激しくなる…'],
+   move() {
+       boss.vx = boss.vy = 0; boss.x = 640 + Math.sin(boss.t / 90) * 100; boss.y = 170 + Math.sin(boss.t / 52) * 40;
+       const lp = [0, 0, 380, 300][this.phase];   // 第2形態から、予告つきのレーザー（なぎ払い）
+       if (lp && boss.t % lp === lp - 1 && !laser) laser = { ox:boss.x, oy:boss.y, ang:aimAng() - 0.45, d:0.011 * (this.phase === 3 ? 1.35 : 1), warn:45, act:80, t:0 };
+   },
+   atk(n) {
+       const a = aimAng(), ph = this.phase;
+       for (let k = -2; k <= 2; k++) bb_({ x:boss.x, y:boss.y, speed:3 + ph * 0.3, angle:a + k * 0.2, turn:0, color:'#ffd24d' });   // 5方向弾
+       if (n % 2 === 0) for (let k = 0; k < (ph === 3 ? 5 : 3); k++) rainAt(clampX(30 + Math.random() * 350), 45, 6.5, 16, '#ffec99');   // 星の雨
+       if (ph === 3 && n % 3 === 0) for (let k = 0; k < 10; k++) bb_({ x:boss.x, y:boss.y, speed:2.3, angle:k * Math.PI / 5 + n * 0.3, turn:0, color:'#ff9a4d', r:5 });   // 全方位
+   } }
+];
+function storyTick() {   // ストーリーの敵の仕掛け（予告・レーザーなど）を毎フレーム進める
+    boss.t++; if (boss.flash > 0) boss.flash--;
+    for (let i = sched.length - 1; i >= 0; i--) if (--sched[i].t <= 0) { const f = sched[i].fn; sched.splice(i, 1); f(); }
+    for (const m of marks) m.t--;
+    marks = marks.filter(m => m.t > 0);
+    if (player.hurtCd > 0) player.hurtCd--;
+    if (laser) {
+        laser.t++;
+        const act = laser.t > laser.warn;
+        if (act) laser.ang += laser.d;
+        if (laser.t > laser.warn + laser.act) laser = null;
+        else if (act && player.invuln <= 0 && !(player.hurtCd > 0)) {
+            const dx = Math.cos(laser.ang), dy = Math.sin(laser.ang), px = player.x - laser.ox, py = player.y - laser.oy;
+            if (px * dx + py * dy > 0 && Math.abs(px * dy - py * dx) < 16) { player.hp -= 18; player.hurtCd = 30; if (player.hp <= 0) { player.hp = 0; gameState = "gameover"; } }
+        }
+    }
+}
+function startStory(i) {
+    startGame(0); storyStage = i; const S = bossCfg = STAGES[i];
+    Object.assign(boss, { w:S.size, h:S.size, hp:S.hp, maxHp:S.hp, jumpPower:S.jump || -9, t:0, shield:false, flash:0, x:650, y:S.hover ? 200 : 340 });
+    marks = []; sched = []; laser = null; player.hurtCd = 0;
+}
+function storyCleared() {
+    storyProg = Math.min(STAGES.length, Math.max(storyProg, storyStage + 1));
+    try { localStorage.setItem('spiritarena-story', String(storyProg)); } catch (e) {}
+}
+const storyClearText = () => bossCfg.last ? 'すべてのステージをクリア！ ありがとう！' : `${bossCfg.name}を倒した！ 次のステージが解放されました`;
+function storySelectTap(e) {
+    const r = canvasElement.getBoundingClientRect();
+    const x = (e.clientX - r.left) * 800 / r.width, y = (e.clientY - r.top) * 450 / r.height;
+    if (x < 150 && y > 410) { gameState = "select"; return; }
+    STAGES.forEach((S, i) => {
+        const cx = 20 + (i % 3) * 260, cy = 85 + ((i / 3) | 0) * 160;
+        if (x >= cx && x <= cx + 240 && y >= cy && y <= cy + 145 && i <= storyProg) { storyStage = i; gameState = "storyIntro"; }
+    });
+}
+function drawStorySelect() {
+    ctx.textAlign = "center"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 28px sans-serif"; ctx.fillText("ストーリー", 400, 40);
+    ctx.fillStyle = "white"; ctx.font = "14px sans-serif"; ctx.fillText(`使用キャラ: ${ch.name}　挑むステージをえらんでください（キー 1〜6）`, 400, 64);
+    STAGES.forEach((S, i) => {
+        const x = 20 + (i % 3) * 260, y = 85 + ((i / 3) | 0) * 160, open = i <= storyProg;
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, y, 240, 145);
+        ctx.strokeStyle = open ? S.color : "#555"; ctx.lineWidth = 2; ctx.strokeRect(x, y, 240, 145);
+        ctx.textAlign = "left"; ctx.fillStyle = open ? "white" : "#777"; ctx.font = "bold 22px sans-serif"; ctx.fillText(S.id, x + 14, y + 32);
+        if (open) {
+            drawBossShape(S, x + 185, y + 60, S.size * 0.8);
+            ctx.font = "bold 20px sans-serif"; ctx.fillText(S.name, x + 14, y + 72);
+            ctx.font = "14px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(S.title, x + 14, y + 96);
+            ctx.fillStyle = i < storyProg ? "#4eef90" : "#ffe97a"; ctx.fillText(i < storyProg ? "✓ クリア済み" : "挑戦できます", x + 14, y + 126);
+        } else { ctx.font = "18px sans-serif"; ctx.fillText("？？？", x + 14, y + 76); ctx.font = "13px sans-serif"; ctx.fillText("前のステージをクリアで解放", x + 14, y + 126); }
+        ctx.textAlign = "center";
+    });
+    ctx.textAlign = "left"; ctx.fillStyle = "#aaa"; ctx.font = "16px sans-serif"; ctx.fillText("← 戻る", 20, 435); ctx.textAlign = "center";
+}
+function drawStoryIntro() {
+    const S = STAGES[storyStage];
+    ctx.textAlign = "center"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 40px sans-serif"; ctx.fillText(`STAGE ${S.id}`, 400, 80);
+    drawBossShape(S, 400, 175, S.size * 1.5);
+    ctx.fillStyle = "white"; ctx.font = "bold 30px sans-serif"; ctx.fillText(S.name, 400, 262);
+    ctx.fillStyle = S.color; ctx.font = "18px sans-serif"; ctx.fillText(S.title, 400, 290);
+    ctx.fillStyle = "#ddd"; S.blurb.forEach((t, k) => ctx.fillText(t, 400, 330 + k * 28));
+    ctx.fillStyle = "#aaa"; ctx.font = "15px sans-serif"; ctx.fillText("タップで開始　（Escで戻る）", 400, 430);
+}
+function drawStoryFx() {   // 予告の印・レーザー・シールド・瞬間移動の光
+    for (const m of marks) { ctx.globalAlpha = 0.25 + 0.5 * (1 - m.t / m.max); ctx.fillStyle = "#ff6b6b"; ctx.fillRect(m.x, m.y, m.w, m.h); }
+    ctx.globalAlpha = 1;
+    if (laser) {
+        const act = laser.t > laser.warn;
+        ctx.strokeStyle = act ? "#ff4d4d" : "rgba(255,120,120,0.45)"; ctx.lineWidth = act ? 9 : 2;
+        ctx.beginPath(); ctx.moveTo(laser.ox, laser.oy); ctx.lineTo(laser.ox + Math.cos(laser.ang) * 1000, laser.oy + Math.sin(laser.ang) * 1000); ctx.stroke();
+    }
+    if (boss.shield) { ctx.strokeStyle = "#e6dcff"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.w * 0.8, 0, Math.PI * 2); ctx.stroke(); }
+    if (boss.flash > 0) { ctx.globalAlpha = boss.flash / 25; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.w * 0.9, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
 }
 
 function drawMode() {
@@ -1068,12 +1227,12 @@ function drawMode() {
     ctx.fillText("SPIRIT ARENA 精霊の闘技場", 400, 70);
     ctx.fillStyle = "#ffe97a"; ctx.font = "16px sans-serif"; ctx.fillText(`${playerName()}　オンライン レート ${rating}（${wins}勝 ${losses}敗）  ✎`, 400, 98);
     if (abandonNote) { ctx.fillStyle = "#ff9a9a"; ctx.font = "13px sans-serif"; ctx.fillText(abandonNote, 400, 114); }
-    [["1. ボス戦", "ひとりで遊ぶ（CPU）", "#ff9955"], ["2. 友達と対戦", "コードをつないで対戦", "#4ea8ff"], ["3. オンライン対戦", "レートの近い相手と対戦", "#b0a0ff"]].forEach((m, i) => {
-        const x = 25 + i * 258;
-        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, 120, 240, 240);
-        ctx.strokeStyle = m[2]; ctx.lineWidth = 3; ctx.strokeRect(x, 120, 240, 240);
-        ctx.fillStyle = "white"; ctx.font = "bold 24px sans-serif"; ctx.fillText(m[0], x + 120, 220);
-        ctx.font = "15px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(m[1], x + 120, 270);
+    [["1. ボス戦", "ひとりで遊ぶ", "#ff9955"], ["2. 友達と対戦", "コードでつなぐ", "#4ea8ff"], ["3. オンライン", "レートの近い人と", "#b0a0ff"], ["4. ストーリー", "ステージを進める", "#ffe97a"]].forEach((m, i) => {
+        const x = 15 + i * 195;
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, 120, 185, 240);
+        ctx.strokeStyle = m[2]; ctx.lineWidth = 3; ctx.strokeRect(x, 120, 185, 240);
+        ctx.fillStyle = "white"; ctx.font = "bold 20px sans-serif"; ctx.fillText(m[0], x + 92, 220);
+        ctx.font = "14px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(m[1], x + 92, 262);
     });
     [[40, "ランキング"], [290, "？ あそびかた（H）"], [540, user ? "アカウント" : "ログイン"]].forEach(([bx, t]) => {
         ctx.fillStyle = "#1b2d24"; ctx.fillRect(bx, 385, 220, 40);
@@ -1192,7 +1351,7 @@ function overlay(title, color, line) {
     ctx.fillStyle = "white"; ctx.font = "20px sans-serif";
     ctx.fillText(line, 400, 240);
     if (pvp && !online) friendButtons();
-    else ctx.fillText(pvp ? "画面タップ または 'R' キーでメニューへ" : "画面タップ または 'R' キーでキャラ選択へ", 400, 290);
+    else ctx.fillText(pvp ? "画面タップ または 'R' キーでメニューへ" : (story ? "画面タップ または 'R' キーでステージ選択へ" : "画面タップ または 'R' キーでキャラ選択へ"), 400, 290);
 }
 
 function draw() {
@@ -1201,6 +1360,8 @@ function draw() {
     if (gameState === "ranking") { drawRanking(); return; }
     if (gameState === "help") { drawHelp(); return; }
     if (gameState === "mode") { drawMode(); return; }
+    if (gameState === "storyIntro") { drawStoryIntro(); return; }
+    if (gameState === "storySelect") { drawStorySelect(); return; }
     if (gameState === "versus") { drawVersus(); return; }
     if (gameState === "lobby") return;
     if (gameState === "select") { drawSelect(); return; }
@@ -1232,6 +1393,7 @@ function draw() {
     }
 
     if (pvp) drawOpp(); else drawBossShape(bossCfg, boss.x, boss.y, boss.w);
+    if (story && !pvp) drawStoryFx();
 
     // 弾は色ごとにまとめて描画（fillStyle切替とbeginPathの回数を削減）
     const groups = BSTYLE;
@@ -1245,10 +1407,11 @@ function draw() {
         }
         ctx.fill();
     }
-    ctx.fillStyle = '#ff33ff';
-    ctx.beginPath();
-    for (const bb of bossBullets) { ctx.moveTo(bb.x + 6, bb.y); ctx.arc(bb.x, bb.y, 6, 0, Math.PI*2); }
-    ctx.fill();
+    for (const bb of bossBullets) {   // 敵の弾（色・大きさ・四角は弾ごと）
+        ctx.fillStyle = bb.color || '#ff33ff';
+        if (bb.w) ctx.fillRect(bb.x - bb.w / 2, bb.y - bb.h / 2, bb.w, bb.h);
+        else { ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r || 6, 0, Math.PI*2); ctx.fill(); }
+    }
 
     if (online && pvp && !settled && (gameState === "clear" || gameState === "gameover")) settle(gameState === "clear");
     if (gameState === "playing" || gameState === "paused") {   // マナゲージ（左上）と、マナ切れ・マナ不足の警告
@@ -1278,10 +1441,10 @@ function draw() {
         bar(10, 28, 150, player.hp, ch.hp);
         ctx.textAlign = "left"; ctx.font = "bold 13px sans-serif"; ctx.fillStyle = "white"; ctx.fillText("HP", 168, 41);
         bar(640, 8, 150, pvp ? opp.hp : boss.hp, pvp ? oppCh.hp : boss.maxHp, "#ff6b8a");
-        ctx.textAlign = "right"; ctx.fillText(pvp ? oppName : `${BOSSES[bossLv].sub} Lv${bossLv + 1}`, 790, 38);
+        ctx.textAlign = "right"; ctx.fillText(pvp ? oppName : story ? bossCfg.name : `${BOSSES[bossLv].sub} Lv${bossLv + 1}`, 790, 38);
     }
     if (gameState === "paused") drawPause();
-    if (gameState === "clear") overlay(pvp ? "YOU WIN!!" : "VICTORY!!", "#4eef90", pvp ? (netNote || `${oppName}に勝ちました！`) : "精霊を鎮めました！おめでとう！");
+    if (gameState === "clear") overlay(pvp ? "YOU WIN!!" : story ? `STAGE ${bossCfg.id} CLEAR!!` : "VICTORY!!", "#4eef90", pvp ? (netNote || `${oppName}に勝ちました！`) : (story ? storyClearText() : "精霊を鎮めました！おめでとう！"));
     else if (gameState === "gameover") overlay(pvp ? "YOU LOSE..." : "DEFEAT...", "#ff5555", pvp ? `${oppName}に負けました...` : "精霊の力に倒れてしまった...");
     if (online && pvp && ratingNote && (gameState === "clear" || gameState === "gameover")) {
         ctx.fillStyle = "#ffe97a"; ctx.font = "bold 22px sans-serif"; ctx.textAlign = "center"; ctx.fillText(ratingNote, 400, 340);
