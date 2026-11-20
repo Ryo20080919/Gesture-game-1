@@ -234,7 +234,12 @@ function resetGame() { // ボス戦→キャラ選択へ / 対人戦→モード
 function chooseChar(i) {
     if (!CHARS[i]) return;
     ch = CHARS[i];
-    if (pvp) { gameState = "lobby"; showLobby(true); if (online) { matching = true; matchStart = Date.now(); settled = false; findMatch(); } } else gameState = "bossSelect";
+    if (pvp && inRoom) {   // 友達対戦の再戦：接続はそのままで、キャラだけ選び直す
+        if (oppLeft) return;
+        mySelected = true; sentHello = false; sayHello();
+        if (oppReady) startPvp(); else { gameState = "lobby"; showLobby(true); }
+    } else if (pvp) { gameState = "lobby"; showLobby(true); if (online) { matching = true; matchStart = Date.now(); settled = false; findMatch(); } }
+    else gameState = "bossSelect";
 }
 function startGame(lv) {
     bossLv = lv; bossCfg = BOSSES[lv];
@@ -279,7 +284,7 @@ canvasElement.addEventListener('pointerdown', e => {
         const cw = sel ? 185 : 170, chh = sel ? 170 : 305;
         if (x >= cx && x <= cx + cw && y >= cy && y <= cy + chh) sel ? chooseChar(i) : startGame(i);
     });
-    if (x < 150 && y > 410) { if (gameState === "bossSelect") resetGame(); else if (gameState === "select") gameState = "mode"; }
+    if (x < 150 && y > 410) { if (gameState === "bossSelect") resetGame(); else if (gameState === "select") { if (inRoom) leaveRoom(); else gameState = "mode"; } }
 });
 
 // --- MediaPipe Hands（軽量設定） ---
@@ -374,13 +379,14 @@ const lobbyEl = document.getElementById('lobby'), lobbyMsgEl = document.getEleme
 const lobbyMsg = t => lobbyMsgEl.textContent = t;
 function showLobby(on) {
     lobbyEl.style.display = on ? 'block' : 'none';
-    for (const id of ['rowHost', 'rowJoin']) document.getElementById(id).style.display = online ? 'none' : '';
-    if (on) lobbyMsg(online ? '対戦相手を探しています…' : 'ルームを作る か、相手のコードを入力');
+    for (const id of ['rowHost', 'rowJoin']) document.getElementById(id).style.display = (online || inRoom) ? 'none' : '';
+    if (on) lobbyMsg(inRoom ? '相手のキャラ選択を待っています…' : online ? '対戦相手を探しています…' : 'ルームを作る か、相手のコードを入力');
 }
 let qpeer = null, matching = false, matchTimer = null;
 let myRematch = false, oppRematch = false, oppLeft = false;   // 友達対戦：再戦の希望 / 相手が退出済み
+let inRoom = false, mySelected = false, oppReady = false, versusAt = 0;   // 友達対戦の部屋にいるか / 再戦のキャラ選択の状況 / 対戦前の紹介画面
 function resetPeer() { try { conn && conn.close(); peer && peer.destroy(); qpeer && qpeer.destroy(); } catch (e) {} conn = null; peer = null; qpeer = null; sentHello = false; }
-function closeNet() { matching = false; clearTimeout(matchTimer); resetPeer(); showLobby(false); }
+function closeNet() { matching = false; inRoom = false; clearTimeout(matchTimer); resetPeer(); showLobby(false); }
 
 // --- レート ---（この端末のブラウザに保存。サーバーが無いので端末内の記録です）
 let rating = 1000, wins = 0, losses = 0, oppRating = 1000, settled = false, ratingNote = "", abandonNote = "";
@@ -605,8 +611,11 @@ function setupConn(c) {
     c.on('data', onData);
     c.on('close', () => {
         const friend = pvp && !online;
-        if (gameState === "playing") { netNote = friend ? `${oppName}が退出しました` : `${oppName}が切断しました`; gameState = "clear"; if (friend) oppLeft = true; }
+        if (gameState === "playing" || gameState === "versus") { netNote = friend ? `${oppName}が退出しました` : `${oppName}が切断しました`; gameState = "clear"; if (friend) oppLeft = true; }
         else if ((gameState === "clear" || gameState === "gameover") && friend) oppLeft = true;   // 結果画面のあいだに相手が退出
+        else if (inRoom && (gameState === "select" || gameState === "lobby")) {   // 再戦のキャラ選択中に相手が退出
+            oppLeft = true; gameState = "lobby"; showLobby(true); lobbyMsg(`${oppName}が退出しました`);
+        }
         else if (gameState === "lobby") { lobbyMsg('切断されました'); if (matching) matchRetry(); }
     });
 }
@@ -630,11 +639,11 @@ function joinRoom() {
 }
 document.getElementById('btnHost').addEventListener('click', hostRoom);
 document.getElementById('btnJoin').addEventListener('click', joinRoom);
-document.getElementById('btnBack').addEventListener('click', () => { closeNet(); gameState = "select"; });
+document.getElementById('btnBack').addEventListener('click', () => { if (inRoom) { leaveRoom(); return; } closeNet(); gameState = "select"; });
 
 function startPvp() {
     matching = false; clearTimeout(matchTimer);
-    myRematch = oppRematch = oppLeft = false;
+    myRematch = oppRematch = oppLeft = false; mySelected = false; oppReady = false; inRoom = pvp && !online;
     settled = false; ratingNote = "";
     if (online) try { localStorage.setItem('spiritarena-inmatch', JSON.stringify({ opp:oppRating, mid:matchId, uid:oppUid })); } catch (e) {}
     showLobby(false);
@@ -649,15 +658,17 @@ function startPvp() {
 function onData(m) {
     if (m.t === 'hello') {
         oppCh = CHARS.find(c => c.id === m.ch) || CHARS[0]; oppRating = m.r || 1000; oppName = cleanName(m.name) || '相手'; oppUid = m.uid || null; if (m.mid && !isHost) matchId = m.mid;
+        oppReady = true;
+        if (inRoom && !mySelected) return;   // 再戦のキャラ選択中：自分が選び終えたら始める
         sayHello();
-        if (gameState === "lobby") startPvp();
+        if (gameState === "lobby") { if (online) showVersus(); else startPvp(); }   // オンラインは、始まる前に相手の紹介を見せる
     } else if (m.t === 's' && gameState === "playing") {
         opp = m; boss.x = 800 - m.x; boss.y = m.y;
         if (m.hp <= 0) { gameState = "clear"; return; }   // 相手のHPが0 = 勝ち
         processOppBullets();
     } else if (m.t === 'rematch') {                        // 友達対戦：相手が「もう一度」を希望
         oppRematch = true;
-        if (myRematch && (gameState === "clear" || gameState === "gameover")) startPvp();
+        if (myRematch && (gameState === "clear" || gameState === "gameover")) enterRematchSelect();
     } else if (m.t === 'k') {                              // 自分の弾が当たった/消された
         const i = bullets.findIndex(b => b.id === m.id);
         if (i >= 0) bullets.splice(i, 1);
@@ -1102,7 +1113,7 @@ function drawSelect() {
     ctx.fillStyle = "#4eef90"; ctx.font = "bold 26px sans-serif";
     ctx.fillText("SPIRIT ARENA 精霊の闘技場", 400, 28);
     ctx.fillStyle = "white"; ctx.font = "14px sans-serif";
-    ctx.fillText("キャラをタップ（キー 1〜8）してスタート", 400, 50);
+    ctx.fillText(inRoom ? "もう一度対戦：キャラをえらんでください（相手とは接続中）" : "キャラをタップ（キー 1〜8）してスタート", 400, 50);
     CHARS.forEach((c, i) => {
         const x = 15 + (i % 4) * 195, y = 62 + ((i / 4) | 0) * 178;
         ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, y, 185, 170);
@@ -1120,11 +1131,41 @@ function drawSelect() {
 }
 
 // --- 描画 ---
+// --- 友達と対戦：再戦が決まったら、接続はそのままで、もう一度キャラを選ぶ ---
+function enterRematchSelect() {
+    myRematch = oppRematch = false; mySelected = false; oppReady = false; sentHello = false;
+    gameState = "select";
+}
+
+// --- オンライン対戦：始まる前に、相手の名前・レート・キャラを数秒見せる ---
+function showVersus() {
+    matching = false; clearTimeout(matchTimer); showLobby(false);
+    if (online) try { localStorage.setItem('spiritarena-inmatch', JSON.stringify({ opp:oppRating, mid:matchId, uid:oppUid })); } catch (e) {}   // 紹介中に抜けたら敗北扱い
+    versusAt = performance.now() + 4000; gameState = "versus";
+    setTimeout(() => { if (gameState === "versus") startPvp(); }, 4000);
+}
+function drawVersus() {
+    ctx.textAlign = "center"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 30px sans-serif"; ctx.fillText("対戦相手が見つかりました！", 400, 60);
+    const panel = (x, label, name, r, c, color) => {
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, 100, 300, 250);
+        ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.strokeRect(x, 100, 300, 250);
+        ctx.fillStyle = "#aaa"; ctx.font = "16px sans-serif"; ctx.fillText(label, x + 150, 128);
+        drawShape(c.shape, x + 150, 185, 34, c.color, 1);
+        ctx.fillStyle = "white"; ctx.font = "bold 26px sans-serif"; ctx.fillText(name, x + 150, 253);
+        ctx.fillStyle = "#ffe97a"; ctx.font = "bold 20px sans-serif"; ctx.fillText(`レート ${r}`, x + 150, 290);
+        ctx.fillStyle = "#ccc"; ctx.font = "16px sans-serif"; ctx.fillText(`${c.name}　HP ${c.hp}`, x + 150, 325);
+    };
+    panel(40, "あなた", playerName(), rating, ch, "#4eef90");
+    panel(460, "相手", oppName, oppRating, oppCh, "#ff9955");
+    ctx.fillStyle = "white"; ctx.font = "bold 36px sans-serif"; ctx.fillText("VS", 400, 235);
+    ctx.fillStyle = "#ccc"; ctx.font = "22px sans-serif"; ctx.fillText(`${Math.max(0, Math.ceil((versusAt - performance.now()) / 1000))}秒後に開始…`, 400, 400);
+}
+
 // --- 友達と対戦：終わっても部屋に残り、もう一度対戦 / いつでも退出 ---
 function requestRematch() {
     if (oppLeft || myRematch || !conn || !conn.open) return;
     myRematch = true; conn.send({ t:'rematch' });
-    if (oppRematch) startPvp();   // 相手も希望していたら、すぐ再戦
+    if (oppRematch) enterRematchSelect();   // 相手も希望していたら、キャラ選択へ
 }
 function leaveRoom() { leaveBtn.textContent = '退出'; leaveArmed = 0; resetGame(); }   // 接続を閉じてメニューへ
 function friendResultTap(e) {
@@ -1160,6 +1201,7 @@ function draw() {
     if (gameState === "ranking") { drawRanking(); return; }
     if (gameState === "help") { drawHelp(); return; }
     if (gameState === "mode") { drawMode(); return; }
+    if (gameState === "versus") { drawVersus(); return; }
     if (gameState === "lobby") return;
     if (gameState === "select") { drawSelect(); return; }
     if (gameState === "bossSelect") { drawBossSelect(); return; }
