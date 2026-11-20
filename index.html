@@ -89,6 +89,7 @@ let shotCooldown = 0;
 let bossShootCooldown = 0;
 let gameState = "mode"; // "mode", "select", "bossSelect", "lobby", "playing", "clear", "gameover"
 let pvp = false, online = false;        // true = 対人戦
+let storyMode = false, storyStage = 0;   // ストーリーモード：4体のボスを順番に攻略
 
 const CHARS = [
  {id:'mint',name:'ミント',shape:'drop',color:'#7be07b',hp:135,speed:2.8,
@@ -157,14 +158,17 @@ window.addEventListener('keydown', e => {
     if ((e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D')) keys.right = true;
     if ((e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W')) { e.preventDefault(); if (gameState === "playing") jump(); }
     if ((e.key === 'ArrowDown' || e.key === 's' || e.key === 'S')) { e.preventDefault(); dropDown(); }
-    if ((e.key === 'r' || e.key === 'R') && (gameState === "clear" || gameState === "gameover")) { if (pvp && !online) requestRematch(); else resetGame(); }
+    if ((e.key === 'r' || e.key === 'R') && (gameState === "clear" || gameState === "gameover")) {
+        if (storyMode) { if (gameState === "clear") { if (storyStage < BOSSES.length - 1) { storyStage++; startGame(storyStage); } else leaveStory(); } else startGame(storyStage); }
+        else if (pvp && !online) requestRematch(); else resetGame();
+    }
     if (e.key === 'Escape' && pvp && !online && (gameState === "clear" || gameState === "gameover")) leaveRoom();
     if ((e.key === 'Escape' || e.key === 'p' || e.key === 'P') && !pvp) {   // ポーズ / 再開
         if (gameState === "playing") { gameState = "paused"; stick.x = stick.y = 0; } else if (gameState === "paused") gameState = "playing";
     }
     if (gameState === "mode" && (e.key === 'h' || e.key === 'H')) { helpPage = 0; gameState = "help"; }
     if ((gameState === "help" || gameState === "ranking") && e.key === 'Escape') gameState = "mode";
-    if (gameState === "mode" && /^[123]$/.test(e.key)) pickMode(+e.key - 1);
+    if (gameState === "mode" && /^[1234]$/.test(e.key)) pickMode(+e.key - 1);
     else if (gameState === "select" && /^[1-9]$/.test(e.key)) chooseChar(+e.key - 1);
     else if (gameState === "bossSelect" && /^[1-4]$/.test(e.key)) startGame(+e.key - 1);
     if (gameState === "bossSelect" && e.key === 'Escape') resetGame();
@@ -234,6 +238,7 @@ function resetGame() { // ボス戦→キャラ選択へ / 対人戦→モード
 function chooseChar(i) {
     if (!CHARS[i]) return;
     ch = CHARS[i];
+    if (storyMode && !pvp) { startGame(storyStage); return; }
     if (pvp && inRoom) {   // 友達対戦の再戦：接続はそのままで、キャラだけ選び直す
         if (oppLeft) return;
         mySelected = true; sentHello = false; sayHello();
@@ -259,7 +264,9 @@ canvasElement.addEventListener('pointerdown', e => {
         return;
     }
     if (gameState === "clear" || gameState === "gameover") {
-        if (pvp && !online) friendResultTap(e); else resetGame();   // 友達対戦は結果画面のボタンで選ぶ
+        if (storyMode) storyResultTap(e);
+        else if (pvp && !online) friendResultTap(e);
+        else resetGame();   // 友達対戦は結果画面のボタンで選ぶ
         return;
     }
     if (gameState === "mode") {
@@ -270,7 +277,7 @@ canvasElement.addEventListener('pointerdown', e => {
             if (mx < 265) openRanking(); else if (mx < 515) { helpPage = 0; gameState = "help"; } else showAuth();
             return;
         }
-        const idx = mx < 271 ? 0 : mx < 529 ? 1 : 2;
+        const idx = Math.min(3, Math.max(0, Math.floor(mx / 200)));
         pickMode(idx); return;
     }
     if (gameState === "ranking") { gameState = "mode"; return; }
@@ -500,9 +507,41 @@ $('btnLogin').addEventListener('click', () => doAuth(false));
 $('btnSignup').addEventListener('click', () => doAuth(true));
 $('btnLogout').addEventListener('click', async () => { if (sb) await sb.auth.signOut(); user = null; myName = ''; rating = 1000; wins = losses = 0; refreshAuthUI(); });
 $('btnAuthClose').addEventListener('click', () => { $('auth').style.display = 'none'; });
-function pickMode(i) {   // オンライン対戦はログインが必要（サーバー設定時）
-    if (i === 2 && sb && !user) { showAuth('オンライン対戦にはログインが必要です'); return; }
-    pvp = i > 0; online = i === 2; gameState = "select";
+function pickMode(i) {   // 0=通常ボス戦、1=ストーリー、2=友達対戦、3=オンライン対戦
+    if (i === 3 && sb && !user) { showAuth('オンライン対戦にはログインが必要です'); return; }
+    storyMode = i === 1;
+    if (storyMode) storyStage = 0;
+    pvp = i === 2 || i === 3;
+    online = i === 3;
+    gameState = "select";
+}
+
+function storyResultTap(e) {
+    const r = canvasElement.getBoundingClientRect();
+    const px = (e.clientX - r.left) * 800 / r.width;
+    const py = (e.clientY - r.top) * 450 / r.height;
+    if (gameState === "clear") {
+        if (storyStage < BOSSES.length - 1) {
+            storyStage++;
+            startGame(storyStage);
+        } else {
+            storyMode = false;
+            storyStage = 0;
+            gameState = "mode";
+        }
+    } else {
+        // 敗北時は同じステージから再挑戦
+        startGame(storyStage);
+    }
+}
+
+function leaveStory() {
+    storyMode = false;
+    storyStage = 0;
+    pvp = false;
+    online = false;
+    bullets = []; bossBullets = []; clones = [];
+    gameState = "mode";
 }
 async function openRanking() {
     gameState = "ranking"; rankRows = null; myRank = 0;
@@ -1068,12 +1107,12 @@ function drawMode() {
     ctx.fillText("SPIRIT ARENA 精霊の闘技場", 400, 70);
     ctx.fillStyle = "#ffe97a"; ctx.font = "16px sans-serif"; ctx.fillText(`${playerName()}　オンライン レート ${rating}（${wins}勝 ${losses}敗）  ✎`, 400, 98);
     if (abandonNote) { ctx.fillStyle = "#ff9a9a"; ctx.font = "13px sans-serif"; ctx.fillText(abandonNote, 400, 114); }
-    [["1. ボス戦", "ひとりで遊ぶ（CPU）", "#ff9955"], ["2. 友達と対戦", "コードをつないで対戦", "#4ea8ff"], ["3. オンライン対戦", "レートの近い相手と対戦", "#b0a0ff"]].forEach((m, i) => {
-        const x = 25 + i * 258;
-        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, 120, 240, 240);
-        ctx.strokeStyle = m[2]; ctx.lineWidth = 3; ctx.strokeRect(x, 120, 240, 240);
-        ctx.fillStyle = "white"; ctx.font = "bold 24px sans-serif"; ctx.fillText(m[0], x + 120, 220);
-        ctx.font = "15px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(m[1], x + 120, 270);
+    [["1. ボス戦", "好きなボスに挑戦", "#ff9955"], ["2. ストーリー", "全4ステージを攻略", "#4eef90"], ["3. 友達対戦", "コードで対戦", "#4ea8ff"], ["4. オンライン", "レート戦", "#b0a0ff"]].forEach((m, i) => {
+        const x = 14 + i * 197;
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, 145, 180, 205);
+        ctx.strokeStyle = m[2]; ctx.lineWidth = 3; ctx.strokeRect(x, 145, 180, 205);
+        ctx.fillStyle = "white"; ctx.font = "bold 20px sans-serif"; ctx.fillText(m[0], x + 90, 225);
+        ctx.font = "14px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(m[1], x + 90, 270);
     });
     [[40, "ランキング"], [290, "？ あそびかた（H）"], [540, user ? "アカウント" : "ログイン"]].forEach(([bx, t]) => {
         ctx.fillStyle = "#1b2d24"; ctx.fillRect(bx, 385, 220, 40);
@@ -1278,10 +1317,26 @@ function draw() {
         bar(10, 28, 150, player.hp, ch.hp);
         ctx.textAlign = "left"; ctx.font = "bold 13px sans-serif"; ctx.fillStyle = "white"; ctx.fillText("HP", 168, 41);
         bar(640, 8, 150, pvp ? opp.hp : boss.hp, pvp ? oppCh.hp : boss.maxHp, "#ff6b8a");
-        ctx.textAlign = "right"; ctx.fillText(pvp ? oppName : `${BOSSES[bossLv].sub} Lv${bossLv + 1}`, 790, 38);
+        ctx.textAlign = "right"; ctx.fillText(pvp ? oppName : (storyMode ? `STAGE ${storyStage + 1}/${BOSSES.length} ${BOSSES[bossLv].sub}` : `${BOSSES[bossLv].sub} Lv${bossLv + 1}`), 790, 38);
     }
     if (gameState === "paused") drawPause();
-    if (gameState === "clear") overlay(pvp ? "YOU WIN!!" : "VICTORY!!", "#4eef90", pvp ? (netNote || `${oppName}に勝ちました！`) : "精霊を鎮めました！おめでとう！");
+    if (storyMode && (gameState === "clear" || gameState === "gameover")) {
+        ctx.fillStyle = "rgba(0,0,0,0.78)"; ctx.fillRect(0, 0, 800, 450);
+        ctx.textAlign = "center";
+        if (gameState === "clear") {
+            ctx.fillStyle = "#4eef90"; ctx.font = "bold 38px sans-serif";
+            ctx.fillText(storyStage === BOSSES.length - 1 ? "STORY COMPLETE!" : "STAGE CLEAR!", 400, 165);
+            ctx.fillStyle = "white"; ctx.font = "21px sans-serif";
+            ctx.fillText(`${BOSSES[storyStage].sub} を倒した！`, 400, 220);
+            ctx.fillStyle = "#ffe97a"; ctx.font = "bold 20px sans-serif";
+            ctx.fillText(storyStage === BOSSES.length - 1 ? "タップ / R：モード選択へ" : `タップ / R：ステージ ${storyStage + 2} へ進む`, 400, 290);
+        } else {
+            ctx.fillStyle = "#ff7777"; ctx.font = "bold 40px sans-serif"; ctx.fillText("DEFEAT...", 400, 165);
+            ctx.fillStyle = "white"; ctx.font = "20px sans-serif"; ctx.fillText("もう一度挑戦しよう！", 400, 220);
+            ctx.fillStyle = "#ffe97a"; ctx.font = "bold 20px sans-serif"; ctx.fillText("タップ / R：このステージを再挑戦", 400, 290);
+        }
+        ctx.fillStyle = "#aaa"; ctx.font = "14px sans-serif"; ctx.fillText(`STAGE ${storyStage + 1} / ${BOSSES.length}　ボス：${BOSSES[storyStage].sub}`, 400, 345);
+    } else if (gameState === "clear") overlay(pvp ? "YOU WIN!!" : "VICTORY!!", "#4eef90", pvp ? (netNote || `${oppName}に勝ちました！`) : "精霊を鎮めました！おめでとう！");
     else if (gameState === "gameover") overlay(pvp ? "YOU LOSE..." : "DEFEAT...", "#ff5555", pvp ? `${oppName}に負けました...` : "精霊の力に倒れてしまった...");
     if (online && pvp && ratingNote && (gameState === "clear" || gameState === "gameover")) {
         ctx.fillStyle = "#ffe97a"; ctx.font = "bold 22px sans-serif"; ctx.textAlign = "center"; ctx.fillText(ratingNote, 400, 340);
