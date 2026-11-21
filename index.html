@@ -879,7 +879,7 @@ function update() {
     if (story && !pvp) storyTick();
     // ボスの攻撃
     if (!pvp) {
-    if (++bossShootCooldown > bossCfg.shootInt) { bossShoot(); bossShootCooldown = 0; }
+    if (++bossShootCooldown > bossCfg.shootInt * (bossCfg.rate || 1)) { bossShoot(); bossShootCooldown = 0; }
     for (let i = bossBullets.length - 1; i >= 0; i--) {
         const bb = bossBullets[i];
         bb.life--;
@@ -1058,7 +1058,7 @@ const HELP = [
  { t:"あそびかた（1/4）", l:["手の形（グー・チョキ・パー）をカメラに見せて、","精霊と戦うシューティングバトルです。","","・手の形ごとに技が変わり、技はマナを消費します。","・手をカメラから外すと、マナが回復します。","・相手のHPを先に0にすれば勝ち、自分が0なら負け。"] },
  { t:"操作（2/4）", l:["・移動：スティック／十字キーを左右に倒す","・ジャンプ：45度以上、上に倒す","・降りる：足場の上で45度以上、下に倒す","　（倒し続けると、続けて下の足場まで降ります）","・画面のどこを押しても、その場にスティックが出ます","・キーボードは矢印キー／WASD、ゲームパッドも使えます","・練習・ストーリー中は右上の「ポーズ」（Escキー）で戻れます"] },
  { t:"モード（3/4）", l:["・練習：好きな精霊（Lv1〜4）と、ひとりで自由に戦います。","　レベルが上がるほど強くなります。","・友達と対戦：片方が「ルームを作る」で出た4桁コードを、","　もう片方が入力して接続します。","　終わったあとも部屋に残り、「もう一度対戦」か「ルームを出る」を選べます。","・オンライン対戦：レートの近い相手を探して対戦します。","　勝つとレートが上がり、負けると下がります。","・キャラは8体。技はキャラごとに違います。"] },
- { t:"ストーリー（4/4）", l:["・ステージ1-1から順に、新しい敵に挑みます。（全12ステージ）","・敵を倒すと、次のステージが解放されます。","・ワールドごとにマップ（足場）が変わります。","・敵ごとに動きと攻撃がまったく違います。","　（光の雨・衝撃波・瞬間移動・つらら・鬼火・シールド・レーザー…）","・進み具合は、この端末に保存されます。","・操作は練習と同じで、キャラも自由に選べます。"] }
+ { t:"ストーリー（4/4）", l:["・ステージ1-1から5-4まで、全20ステージ。順に新しい敵に挑みます。","・敵を倒すと、次のステージが解放されます。","・敵の体力は、少しずつ増えていきます。（最後は1000）","・ワールドごとにマップ（足場）と色が変わります。","・敵ごとに動きと攻撃がまったく違います。","　（光の雨・衝撃波・瞬間移動・つらら・鬼火・炎の柱・レーザー…）","・進み具合は、この端末に保存されます。"] }
 ];
 function drawHelp() {
     const p = HELP[helpPage];
@@ -1097,14 +1097,16 @@ const rainAt = (x, delay, vy, dmg, color) => {   // 床に赤い印 → 少し�
 const LAYOUTS = {   // マップ（足場の並び）。左側だけ書けば、右側は自動で左右対称になる
     a: [[320,[45,240]], [240,[45,240]], [160,[45,240]]],                      // 森：おなじみの3段
     b: [[330,[20,150,280]], [250,[85,215]], [170,[20,150,280]]],              // 峰：足場が多く、段が広い
-    c: [[330,[60,230]], [255,[145]], [180,[20,270]], [105,[145]]]             // そら：高く、細い道
+    c: [[330,[60,230]], [255,[145]], [180,[20,270]], [105,[145]]],            // そら：高く、細い道
+    d: [[330,[20,150,280]], [260,[85,215]], [190,[150]], [120,[20,280]]],     // 火山：中央が高く、左右に逃げ場
+    e: [[335,[60,235]], [268,[145]], [200,[60,235]], [132,[145]]]             // 城：細い足場が交互に並ぶ
 };
 function setLayout(k) {
     platforms.length = 1;   // [0]は床
     for (const [y, xs] of LAYOUTS[k] || LAYOUTS.a) for (const x of xs) { platforms.push({ x, y, w:115, h:15 }); platforms.push({ x:800 - x - 115, y, w:115, h:15 }); }
 }
 setLayout('a');
-const W1 = 'ひかりの森', W2 = '凍てつく峰', W3 = '星のそら';
+const W = ['ひかりの森', '凍てつく峰', '星のそら', '灼熱の火山', 'はての城'];
 const waveAt = (vx, dmg) => bb_({ x:boss.x, y:388, vx, vy:0, hw:16, hh:12, w:32, h:24, color:'#ff9a4d', dmg, life:400 });   // 床を走る衝撃波（ジャンプでよける）
 const lobAt = (T, g, color, dmg) => bb_({ x:boss.x, y:boss.y, vx:(player.x - boss.x) / T, vy:(player.y - boss.y) / T - 0.5 * g * T, grav:g, r:10, color, dmg, life:300 });   // プレイヤーの位置に落ちる放物線
 const fanAt = (n, sp, spread, color, r) => { const a = aimAng(); for (let k = -(n - 1) / 2; k <= (n - 1) / 2; k++) bb_({ x:boss.x, y:boss.y, speed:sp, angle:a + k * spread, turn:0, r:r || 6, color }); };
@@ -1114,80 +1116,145 @@ const blink = per => {   // 約 per フレームごとに、直前に光って�
     if (ph === per - 20) boss.flash = 20;
     if (ph === per - 1) { const ps = platforms.filter(p => p.x >= 400 && p.y < 400); const p = ps[(Math.random() * ps.length) | 0]; boss.x = p.x + p.w / 2; boss.y = p.y - boss.h / 2; }
 };
-const sweepLaser = (a0, d) => { if (!laser) laser = { ox:boss.x, oy:boss.y, ang:a0, d, warn:45, act:80, t:0 }; };   // 予告つきレーザー
+const sweepLaser = (a0, d, arms) => { if (!laser) laser = { ox:boss.x, oy:boss.y, ang:a0, d, arms:arms || 1, warn:45, act:80, t:0 }; };   // 予告つきレーザー（arms本が回転）
+const colAt = (x, delay, dmg) => {   // 床に印 → 噴火（縦に長い炎の柱。1段上の足場なら安全）
+    marks.push({ x:x - 18, y:394, w:36, h:6, t:delay, max:delay });
+    later(delay, () => bb_({ x, y:340, vx:0, vy:0, hw:18, hh:62, w:36, h:124, color:'#ff7a2e', dmg, life:28 }));
+};
+const wallAt = () => { const gap = [370, 290, 215, 140][(Math.random() * 4) | 0]; for (let y = 30; y < 400; y += 45) if (Math.abs(y - gap) > 55) bb_({ x:boss.x, y, vx:-2.4, vy:0, r:9, color:'#ff7a2e', dmg:15 }); };   // 火の壁：すき間をすり抜ける
+const slashAt = (sp, dmg) => bb_({ x:boss.x, y:boss.y, vx:-sp, vy:0, hw:14, hh:34, w:28, h:68, color:'#d8d8ff', dmg, life:300 });   // 縦に大きな斬撃
+const burstAt = (x, y, delay, n, sp, dmg) => {   // 印の円 → 爆発して、放射状に弾が広がる
+    marks.push({ x, y, r:34, t:delay, max:delay });
+    later(delay, () => { for (let k = 0; k < n; k++) bb_({ x, y, speed:sp, angle:k * 2 * Math.PI / n, turn:0, r:6, color:'#ffd0ff', dmg }); });
+};
 const STAGES = [
- // ===== WORLD 1 ひかりの森（やさしい）=====
- { id:'1-1', world:W1, map:'a', name:'ルシ', title:'蛍の精', color:'#c8ff7a', pts:10, spiky:true, size:38, hp:300, dm:0.6, hover:true, noPlat:true, shootInt:100,
+ // ===== WORLD 1 ひかりの森 =====
+ { id:'1-1', name:'ルシ', title:'蛍の精', color:'#c8ff7a', pts:10, spiky:true, size:38, dm:0.6, hover:true, noPlat:true, shootInt:100,
    blurb:['森の奥で、ひとつの光がゆれている。', '近づく者に、光の雨を降らせるという…'],
    move() { hoverAt(620, 110, 150, 45, 55, 37); },
    atk(n) { if (n % 3) { for (const d of [-45, 45]) rainAt(clampX(player.x + d), 60, 4.5, 15, '#fff27a'); } else fanAt(3, 1.8, 0.25, '#c8ff7a'); } },   // 光の雨：プレイヤーの頭上に印 → 落下
- { id:'1-2', world:W1, map:'a', name:'コケタ', title:'苔の子', color:'#8fd16a', pts:7, spiky:false, size:40, hp:420, dm:0.65, moveInt:90, moveSpd:3, chase:0, jump:-8, jumpP:0.5, shootInt:110,
+ { id:'1-2', name:'コケタ', title:'苔の子', color:'#8fd16a', pts:7, spiky:false, size:40, dm:0.65, moveInt:90, moveSpd:3, chase:0, jump:-8, jumpP:0.5, shootInt:110,
    blurb:['しめった岩かげで、苔のかたまりがはねている。', 'ぴょんぴょん動き、ゆっくりな弾を飛ばしてくる。'],
    atk(n) { fanAt(1, 2, 0, '#8fd16a', 7); if (n % 3 === 0) lobAt(75, 0.1, '#b6e68f', 14); } },
- { id:'1-3', world:W1, map:'a', name:'ガニマル', title:'岩蟹', color:'#c9935f', pts:6, spiky:false, size:46, hp:520, dm:0.75, moveInt:80, moveSpd:3, chase:0.4, jump:-8.5, jumpP:0.25, shootInt:100,
+ { id:'1-3', name:'ガニマル', title:'岩蟹', color:'#c9935f', pts:6, spiky:false, size:46, dm:0.75, moveInt:80, moveSpd:3, chase:0.4, jump:-8.5, jumpP:0.25, shootInt:100,
    blurb:['川辺の岩が、ゆっくり動き出した。', '甲羅の石を飛ばし、地面を揺らしてくる！'],
    atk(n) { if (n % 3 === 0) waveAt(-2.7, 20); else lobAt(65, 0.13, '#c9935f', 18); } },   // 地ならし（衝撃波）と石つぶて（放物線）
- { id:'1-4', world:W1, map:'a', name:'カゲロウ', title:'影狐', color:'#ff9ec4', pts:3, spiky:true, size:40, hp:600, dm:0.85, hover:true, noPlat:true, shootInt:60,
+ { id:'1-4', name:'カゲロウ', title:'影狐', color:'#ff9ec4', pts:3, spiky:true, size:40, dm:0.85, hover:true, noPlat:true, shootInt:60,
    blurb:['月夜に、影だけが走り回っている。', '光ったと思えば、もう別の場所にいる…'],
    move() { blink(120); },
    atk() { fanAt(2, 3.6, 0.24, '#ff7fb0', 5); } },
- // ===== WORLD 2 凍てつく峰（ふつう）=====
- { id:'2-1', world:W2, map:'b', name:'ハリネズ', title:'針鼠', color:'#e0c08a', pts:9, spiky:true, size:42, hp:800, dm:1, moveInt:40, moveSpd:6, chase:1.5, jump:-9.5, jumpP:0.5, shootInt:70,
+ // ===== WORLD 2 凍てつく峰 =====
+ { id:'2-1', name:'ハリネズ', title:'針鼠', color:'#e0c08a', pts:9, spiky:true, size:42, moveInt:50, moveSpd:5, chase:1, jump:-9, jumpP:0.4, shootInt:70,
    blurb:['雪の岩場を、とげだらけの影が駆けまわる。', '針を扇のように飛ばし、地をはう針も放つ！'],
-   atk(n) { fanAt(7, 3, 0.17, '#e0c08a', 4); if (n % 3 === 0) waveAt(-3.8, 20); } },
- { id:'2-2', world:W2, map:'b', name:'ツララ', title:'氷の女王', color:'#9fe8ff', pts:6, spiky:true, size:44, hp:950, dm:1, hover:true, noPlat:true, shootInt:75,
+   atk(n) { fanAt(5, 3, 0.2, '#e0c08a', 4); if (n % 3 === 0) waveAt(-3.2, 20); } },
+ { id:'2-2', name:'ツララ', title:'氷の女王', color:'#9fe8ff', pts:6, spiky:true, size:44, hover:true, noPlat:true, shootInt:75,
    blurb:['凍てつく峰に、氷の女王が待っている。', '天井から、つららが降りそそぐ！'],
    move() { hoverAt(640, 90, 190, 30, 70, 45); },
    atk(n) {
-       if (n % 2) { for (let k = 0; k < 5; k++) rainAt(clampX(40 + k * 80 + Math.random() * 30 - 15), 50, 7.5, 18, '#bff3ff'); }   // つらら雨：すき間を見つけてよける
-       else { for (const d of [-0.25, 0, 0.25]) { const a = aimAng() + d; bb_({ x:boss.x, y:boss.y, vx:Math.cos(a) * 3.2, vy:Math.sin(a) * 3.2 - 1, grav:0.07, bounce:1, r:8, color:'#9fe8ff', dmg:16, life:420 }); } }   // 床で1回はねる氷弾
+       if (n % 2) { for (let k = 0; k < 4; k++) rainAt(clampX(50 + k * 100 + Math.random() * 30 - 15), 55, 7, 18, '#bff3ff'); }   // つらら雨：すき間を見つけてよける
+       else { for (const d of [-0.25, 0, 0.25]) { const a = aimAng() + d; bb_({ x:boss.x, y:boss.y, vx:Math.cos(a) * 3.1, vy:Math.sin(a) * 3.1 - 1, grav:0.07, bounce:1, r:8, color:'#9fe8ff', dmg:16, life:420 }); } }   // 床で1回はねる氷弾
    } },
- { id:'2-3', world:W2, map:'b', name:'オニビ', title:'鬼火', color:'#7fe0ff', pts:5, spiky:true, size:40, hp:1000, dm:1, hover:true, noPlat:true, shootInt:130,
+ { id:'2-3', name:'オニビ', title:'鬼火', color:'#7fe0ff', pts:5, spiky:true, size:40, hover:true, noPlat:true, shootInt:130,
    blurb:['青白い炎が、ぐるぐると宙をまわっている。', 'まわって力をためたら、いっせいに飛んでくる！'],
    move() { hoverAt(630, 80, 200, 40, 75, 50); },
-   atk() { for (let k = 0; k < 6; k++) bb_({ x:boss.x, y:boss.y, orbit:55 + k * 12, oa:k * Math.PI / 3, r:8, color:'#7fe0ff', dmg:16 }); } },   // 鬼火：敵のまわりを回ったあと、プレイヤーへ
- { id:'2-4', world:W2, map:'b', name:'ミラージュ', title:'鏡の魔人', color:'#d6c8ff', pts:8, spiky:false, size:46, hp:1150, dm:1.05, hover:true, noPlat:true,
-   get shootInt() { return boss.shield ? 6 : 50; },
+   atk() { for (let k = 0; k < 5; k++) bb_({ x:boss.x, y:boss.y, orbit:55 + k * 13, oa:k * 2 * Math.PI / 5, r:8, color:'#7fe0ff', dmg:16 }); } },   // 鬼火：敵のまわりを回ったあと、プレイヤーへ
+ { id:'2-4', name:'ミラージュ', title:'鏡の魔人', color:'#d6c8ff', pts:8, spiky:false, size:46, hover:true, noPlat:true,
+   get shootInt() { return boss.shield ? 7 : 55; },
    blurb:['鏡の迷宮で、魔人がほほえんでいる。', '身を守るときは、どんな攻撃も通さない…'],
-   move() { hoverAt(620, 100, 230, 20, 80, 60); boss.shield = boss.t % 420 >= 230; },   // 約4秒は攻撃が通り、約3秒はシールドで無効
+   move() { hoverAt(620, 100, 230, 20, 80, 60); boss.shield = boss.t % 420 >= 250; },   // 約4秒は攻撃が通り、約2.8秒はシールドで無効
    atk() {
-       if (boss.shield) { const a = boss.t * 0.17; for (const o of [0, Math.PI]) bb_({ x:boss.x, y:boss.y, speed:2.6, angle:a + o, turn:0, r:5, color:'#e6dcff' }); }   // シールド中：うずまき弾
-       else fanAt(5, 3.4, 0.16, '#d6c8ff');
+       if (boss.shield) { const a = boss.t * 0.17; bb_({ x:boss.x, y:boss.y, speed:2.5, angle:a, turn:0, r:5, color:'#e6dcff' }); }   // シールド中：うずまき弾
+       else fanAt(5, 3.2, 0.17, '#d6c8ff');
    } },
- // ===== WORLD 3 星のそら（むずかしい）=====
- { id:'3-1', world:W3, map:'c', name:'ホウキボシ', title:'彗星', color:'#ffb3f0', pts:8, spiky:true, size:42, hp:1250, dm:1.1, hover:true, noPlat:true, shootInt:10,
+ // ===== WORLD 3 星のそら =====
+ { id:'3-1', name:'ホウキボシ', title:'彗星', color:'#ffb3f0', pts:8, spiky:true, size:42, hover:true, noPlat:true, shootInt:11,
    blurb:['長い尾を引いて、星がそらを駆けぬける。', '尾からは、渦をまく光がふりそそぐ！'],
-   move() { hoverAt(610, 170, 150, 50, 26, 40); },
-   atk(n) { for (const o of [0, Math.PI]) bb_({ x:boss.x, y:boss.y, speed:2.8, angle:n * 0.37 + o, turn:0, r:5, color:'#ffb3f0' }); if (n % 20 === 0) for (const d of [-70, 0, 70]) rainAt(clampX(player.x + d), 45, 6, 16, '#ffd6f7'); } },
- { id:'3-2', world:W3, map:'c', name:'ゲンジュウ', title:'幻獣キメラ', color:'#ff8c5a', pts:7, spiky:true, size:52, hp:1500, dm:1.15, moveInt:30, moveSpd:7, chase:2, jump:-10.5, jumpP:0.8, shootInt:55,
+   move() { hoverAt(610, 170, 150, 50, 28, 40); },
+   atk(n) { bb_({ x:boss.x, y:boss.y, speed:2.6, angle:n * 0.37, turn:0, r:5, color:'#ffb3f0' }); if (n % 20 === 0) for (const d of [-70, 70]) rainAt(clampX(player.x + d), 50, 5.5, 16, '#ffd6f7'); } },
+ { id:'3-2', name:'ゲンジュウ', title:'幻獣キメラ', color:'#ff8c5a', pts:7, spiky:true, size:52, moveInt:40, moveSpd:6, chase:1.5, jump:-10, jumpP:0.6, shootInt:60,
    blurb:['いくつもの獣が混ざった、おそろしい影。', '牙も、炎も、地ひびきも、ぜんぶ使ってくる！'],
    atk(n) {
        const k = n % 4;
        if (k === 0) { lobAt(60, 0.13, '#ff8c5a', 18); lobAt(85, 0.13, '#ffb38a', 18); }
-       else if (k === 1) { waveAt(-4, 22); fanAt(3, 3.4, 0.2, '#ff8c5a'); }
-       else if (k === 2) fanAt(5, 3.6, 0.17, '#ff8c5a');
-       else for (const d of [-0.3, 0, 0.3]) { const a = aimAng() + d; bb_({ x:boss.x, y:boss.y, vx:Math.cos(a) * 3.3, vy:Math.sin(a) * 3.3 - 1, grav:0.07, bounce:1, r:8, color:'#ffb38a', dmg:16, life:420 }); }
+       else if (k === 1) { waveAt(-3.5, 22); fanAt(3, 3.2, 0.2, '#ff8c5a'); }
+       else if (k === 2) fanAt(5, 3.4, 0.17, '#ff8c5a');
+       else for (const d of [-0.3, 0, 0.3]) { const a = aimAng() + d; bb_({ x:boss.x, y:boss.y, vx:Math.cos(a) * 3.2, vy:Math.sin(a) * 3.2 - 1, grav:0.07, bounce:1, r:8, color:'#ffb38a', dmg:16, life:420 }); }
    } },
- { id:'3-3', world:W3, map:'c', name:'ヤミノトビラ', title:'闇の門', color:'#8a6bff', pts:4, spiky:true, size:50, hp:1700, dm:1.2, hover:true, noPlat:true, shootInt:90,
+ { id:'3-3', name:'ヤミノトビラ', title:'闇の門', color:'#8a6bff', pts:4, spiky:true, size:50, hover:true, noPlat:true, shootInt:95,
    blurb:['そらのはてに、闇の門がひらいている。', '門は身を守り、鬼火を放ち、光でなぎ払う…'],
-   move() { hoverAt(640, 80, 210, 30, 100, 60); boss.shield = boss.t % 360 >= 250; if (boss.t % 420 === 419) sweepLaser(aimAng() - 0.45, 0.011); },
-   atk(n) { if (boss.shield) fanAt(7, 3, 0.16, '#8a6bff'); else for (let k = 0; k < 6; k++) bb_({ x:boss.x, y:boss.y, orbit:50 + k * 10, oa:k * Math.PI / 3, r:8, color:'#b19cff', dmg:17 }); } },
- { id:'3-4', world:W3, map:'c', name:'スターヴ', title:'星喰らいの竜', color:'#ffd24d', pts:12, spiky:true, size:58, hp:2100, dm:1.2, hover:true, noPlat:true, last:true,
+   move() { hoverAt(640, 80, 210, 30, 100, 60); boss.shield = boss.t % 360 >= 260; if (boss.t % 460 === 459) sweepLaser(aimAng() - 0.45, 0.011); },
+   atk() { if (boss.shield) fanAt(5, 2.9, 0.18, '#8a6bff'); else for (let k = 0; k < 5; k++) bb_({ x:boss.x, y:boss.y, orbit:50 + k * 11, oa:k * 2 * Math.PI / 5, r:8, color:'#b19cff', dmg:17 }); } },
+ { id:'3-4', name:'スターヴ', title:'星喰らいの竜', color:'#ffd24d', pts:12, spiky:true, size:54, hover:true, noPlat:true,
    get phase() { return boss.hp > boss.maxHp * 0.6 ? 1 : boss.hp > boss.maxHp * 0.3 ? 2 : 3; },
-   get shootInt() { return [0, 70, 58, 46][this.phase]; },
-   blurb:['夜空の星を食らう竜が、最後の敵だ。', '力を取り戻すほど、攻撃は激しくなる…'],
+   get shootInt() { return [0, 80, 68, 56][this.phase]; },
+   blurb:['夜空の星を食らう竜が、世界のはてを目ざす。', '力を取り戻すほど、攻撃は激しくなる…'],
    move() {
        hoverAt(640, 100, 170, 40, 90, 52);
-       const lp = [0, 0, 380, 300][this.phase];   // 第2形態から、予告つきのレーザー（なぎ払い）
-       if (lp && boss.t % lp === lp - 1) sweepLaser(aimAng() - 0.45, 0.011 * (this.phase === 3 ? 1.35 : 1));
+       const lp = [0, 0, 420, 340][this.phase];   // 第2形態から、予告つきのレーザー（なぎ払い）
+       if (lp && boss.t % lp === lp - 1) sweepLaser(aimAng() - 0.45, 0.011);
    },
    atk(n) {
        const ph = this.phase;
-       fanAt(5, 3 + ph * 0.3, 0.2, '#ffd24d');   // 5方向弾
-       if (n % 2 === 0) for (let k = 0; k < (ph === 3 ? 5 : 3); k++) rainAt(clampX(30 + Math.random() * 350), 45, 6.5, 16, '#ffec99');   // 星の雨
-       if (ph === 3 && n % 3 === 0) for (let k = 0; k < 10; k++) bb_({ x:boss.x, y:boss.y, speed:2.3, angle:k * Math.PI / 5 + n * 0.3, turn:0, color:'#ff9a4d', r:5 });   // 全方位
+       fanAt(5, 3 + ph * 0.2, 0.2, '#ffd24d');   // 5方向弾
+       if (n % 2 === 0) for (let k = 0; k < 3; k++) rainAt(clampX(30 + Math.random() * 350), 50, 6, 16, '#ffec99');   // 星の雨
+   } },
+ // ===== WORLD 4 灼熱の火山 =====
+ { id:'4-1', name:'マグマラ', title:'溶岩のスライム', color:'#ff7a2e', pts:7, spiky:false, size:46, moveInt:60, moveSpd:4, chase:0.8, jump:-9, jumpP:0.35, shootInt:100,
+   blurb:['熱い大地から、溶岩のかたまりがはい出した。', '足もとから、とつぜん炎の柱が噴き上がる！'],
+   atk(n) { if (n % 2) { for (const d of [-40, 40]) colAt(clampX(player.x + d), 60, 18); } else lobAt(70, 0.12, '#ff7a2e', 16); } },   // 噴火：印のあとに柱（1段上の足場なら安全）
+ { id:'4-2', name:'ホムラドリ', title:'炎の鳥', color:'#ffb347', pts:5, spiky:true, size:44, hover:true, noPlat:true, shootInt:110,
+   blurb:['炎をまとった鳥が、火の壁を羽ばたかせる。', '壁のすき間を見つけて、すり抜けろ！'],
+   move() { hoverAt(630, 100, 170, 50, 60, 38); },
+   atk(n) { wallAt(); if (n % 3 === 0) fanAt(3, 2.9, 0.25, '#ffb347'); } },
+ { id:'4-3', name:'ガンセキ', title:'岩石の巨人', color:'#b07a5a', pts:6, spiky:false, size:56, moveInt:70, moveSpd:3, chase:0.5, jump:-8.5, jumpP:0.2, shootInt:105,
+   blurb:['山のような巨人が、岩を転がしてくる。', '岩は床で何度もはね、足もとをおそう！'],
+   atk(n) { if (n % 2) bb_({ x:boss.x, y:boss.y, vx:-2.6, vy:-1, grav:0.12, bounce:3, r:14, hw:12, hh:12, color:'#b07a5a', dmg:20, life:600 }); else lobAt(70, 0.13, '#b07a5a', 18); } },
+ { id:'4-4', name:'ヒノカグツチ', title:'火の神', color:'#ff4d2e', pts:10, spiky:true, size:52, hover:true, noPlat:true, shootInt:105,
+   blurb:['火山の頂で、炎の神が目をさました。', '炎の柱、火の壁、鬼火…すべてをあやつる！'],
+   move() { hoverAt(630, 90, 185, 40, 85, 50); },
+   atk(n) {
+       const k = n % 3;
+       if (k === 0) { for (const d of [-60, 0, 60]) colAt(clampX(player.x + d), 60, 18); }
+       else if (k === 1) wallAt();
+       else for (let j = 0; j < 5; j++) bb_({ x:boss.x, y:boss.y, orbit:50 + j * 12, oa:j * 2 * Math.PI / 5, r:8, color:'#ff7a2e', dmg:17 });
+   } },
+ // ===== WORLD 5 はての城 =====
+ { id:'5-1', name:'ホロビ', title:'亡霊の騎士', color:'#c8c8ff', pts:3, spiky:false, size:46, hover:true, noPlat:true, shootInt:105,
+   blurb:['はての城の門に、亡霊の騎士が立っている。', '消えては現れ、大きな斬撃を放ってくる…'],
+   move() { blink(130); },
+   atk(n) { slashAt(3.2, 20); if (n % 2) fanAt(3, 2.9, 0.22, '#c8c8ff'); } },
+ { id:'5-2', name:'ギアー', title:'歯車の機械', color:'#9aa6b8', pts:8, spiky:true, size:50, hover:true, noPlat:true, shootInt:115,
+   blurb:['止まった時計塔の歯車が、ひとりでに回りだす。', '回転するレーザーが、広間をなぎ払う！'],
+   move() { hoverAt(630, 60, 200, 25, 110, 70); if (boss.t % 340 === 339) sweepLaser(aimAng() - 1.0, 0.012, 2); },
+   atk() { fanAt(5, 2.9, 0.2, '#9aa6b8'); } },
+ { id:'5-3', name:'ホシヨミ', title:'星読みの魔女', color:'#ff9cf0', pts:5, spiky:true, size:44, hover:true, noPlat:true, shootInt:110,
+   blurb:['星を読む魔女が、ほうきで夜空をかける。', '光った場所は、すぐあとに爆発する！'],
+   move() { hoverAt(620, 110, 160, 45, 65, 42); },
+   atk(n) { for (const d of [-50, 50]) burstAt(clampX(player.x + d), Math.max(60, Math.min(380, player.y + Math.random() * 60 - 30)), 55, 8, 2.5, 16); if (n % 3 === 0) fanAt(3, 3, 0.2, '#ff9cf0'); } },
+ { id:'5-4', name:'エンド', title:'終焉の王', color:'#ffe97a', pts:14, spiky:true, size:60, hover:true, noPlat:true, last:true,
+   get phase() { return boss.hp > boss.maxHp * 0.6 ? 1 : boss.hp > boss.maxHp * 0.3 ? 2 : 3; },
+   get shootInt() { return [0, 90, 78, 66][this.phase]; },
+   blurb:['すべての終わりに、玉座の王が待っている。', '最後の力を取り戻した王に、挑め！'],
+   move() {
+       hoverAt(640, 100, 175, 45, 95, 55);
+       boss.shield = this.phase === 3 && boss.t % 520 >= 420;   // 第3形態：ときどきシールド
+       const lp = [0, 0, 420, 350][this.phase];   // 第2形態から、2本の回転レーザー
+       if (lp && boss.t % lp === lp - 1) sweepLaser(aimAng() - 0.9, 0.012, 2);
+   },
+   atk(n) {
+       const ph = this.phase;
+       fanAt(5, 2.9 + ph * 0.2, 0.2, '#ffe97a');
+       if (n % 2 === 0) for (let k = 0; k < 3; k++) rainAt(clampX(30 + Math.random() * 350), 50, 6, 16, '#fff3b0');   // 星の雨
+       if (ph >= 2 && n % 3 === 0) burstAt(clampX(player.x), Math.max(60, Math.min(380, player.y)), 55, 8, 2.5, 16);   // 爆発
    } }
 ];
+const TINTS = [null, 'rgba(120,200,255,0.10)', 'rgba(150,120,255,0.12)', 'rgba(255,140,70,0.12)', 'rgba(30,0,50,0.28)'];
+STAGES.forEach((S, i) => {   // 体力・ダメージ・攻撃の間隔・マップを、ステージ番号に合わせて自動で決める
+    const w = (i / 4) | 0;
+    S.world = W[w]; S.map = 'abcde'[w]; S.tint = TINTS[w];
+    S.hp = i === STAGES.length - 1 ? 1000 : Math.round((250 + i * 750 / 19) / 10) * 10;   // 体力は少しずつ増えて、最後(5-4)で1000
+    if (i >= 4) { S.dm = 0.7 + (i - 4) * 0.02; S.rate = 1.4 - (i - 4) * 0.025; }          // 2-1以降：ダメージ倍率(0.70→1.0)・攻撃の間隔(1.4倍→約1.0倍)
+});
 function storyTick() {   // ストーリーの敵の仕掛け（予告・レーザーなど）を毎フレーム進める
     boss.t++; if (boss.flash > 0) boss.flash--;
     for (let i = sched.length - 1; i >= 0; i--) if (--sched[i].t <= 0) { const f = sched[i].fn; sched.splice(i, 1); f(); }
@@ -1200,8 +1267,15 @@ function storyTick() {   // ストーリーの敵の仕掛け（予告・レー�
         if (act) laser.ang += laser.d;
         if (laser.t > laser.warn + laser.act) laser = null;
         else if (act && player.invuln <= 0 && !(player.hurtCd > 0)) {
-            const dx = Math.cos(laser.ang), dy = Math.sin(laser.ang), px = player.x - laser.ox, py = player.y - laser.oy;
-            if (px * dx + py * dy > 0 && Math.abs(px * dy - py * dx) < 16) { player.hp -= Math.round(18 * (bossCfg.dm || 1)); player.hurtCd = 30; if (player.hp <= 0) { player.hp = 0; gameState = "gameover"; } }
+            const px = player.x - laser.ox, py = player.y - laser.oy;
+            for (let k = 0; k < laser.arms; k++) {   // 回転するレーザー（arms本）
+                const a = laser.ang + k * 2 * Math.PI / laser.arms, dx = Math.cos(a), dy = Math.sin(a);
+                if (px * dx + py * dy > 0 && Math.abs(px * dy - py * dx) < 16) {
+                    player.hp -= Math.round(18 * (bossCfg.dm || 1)); player.hurtCd = 30;
+                    if (player.hp <= 0) { player.hp = 0; gameState = "gameover"; }
+                    break;
+                }
+            }
         }
     }
 }
@@ -1219,29 +1293,29 @@ const storyClearText = () => bossCfg.last ? 'すべてのステージをクリ�
 function storySelectTap(e) {
     const r = canvasElement.getBoundingClientRect();
     const x = (e.clientX - r.left) * 800 / r.width, y = (e.clientY - r.top) * 450 / r.height;
-    if (x < 150 && y > 428) { gameState = "select"; return; }
+    if (x < 150 && y > 432) { gameState = "select"; return; }
     STAGES.forEach((S, i) => {
-        const cx = 15 + (i % 4) * 195, cy = 80 + ((i / 4) | 0) * 125;
-        if (x >= cx && x <= cx + 185 && y >= cy && y <= cy + 96 && i <= storyProg) { storyStage = i; gameState = "storyIntro"; }
+        const cx = 10 + ((i / 4) | 0) * 155, cy = 85 + (i % 4) * 88;
+        if (x >= cx && x <= cx + 150 && y >= cy && y <= cy + 80 && i <= storyProg) { storyStage = i; gameState = "storyIntro"; }
     });
 }
 function drawStorySelect() {
-    ctx.textAlign = "center"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 26px sans-serif"; ctx.fillText("ストーリー", 400, 28);
-    ctx.fillStyle = "white"; ctx.font = "13px sans-serif"; ctx.fillText(`使用キャラ: ${ch.name}　挑むステージをえらんでください`, 400, 50);
+    ctx.textAlign = "center"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 24px sans-serif"; ctx.fillText("ストーリー", 400, 26);
+    ctx.fillStyle = "white"; ctx.font = "13px sans-serif"; ctx.fillText(`使用キャラ: ${ch.name}　挑むステージをえらんでください（全${STAGES.length}ステージ）`, 400, 48);
     STAGES.forEach((S, i) => {
-        const x = 15 + (i % 4) * 195, y = 80 + ((i / 4) | 0) * 125, open = i <= storyProg;
-        if (i % 4 === 0) { ctx.textAlign = "left"; ctx.fillStyle = "#9fd"; ctx.font = "bold 13px sans-serif"; ctx.fillText(`WORLD ${i / 4 + 1}　${S.world}`, x, y - 6); }
-        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, y, 185, 96);
-        ctx.strokeStyle = open ? S.color : "#555"; ctx.lineWidth = 2; ctx.strokeRect(x, y, 185, 96);
-        ctx.textAlign = "left"; ctx.fillStyle = open ? "white" : "#777"; ctx.font = "bold 18px sans-serif"; ctx.fillText(S.id, x + 10, y + 24);
+        const x = 10 + ((i / 4) | 0) * 155, y = 85 + (i % 4) * 88, open = i <= storyProg;
+        if (i % 4 === 0) { ctx.textAlign = "left"; ctx.fillStyle = "#9fd"; ctx.font = "bold 13px sans-serif"; ctx.fillText(`W${i / 4 + 1} ${S.world}`, x, 74); }
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, y, 150, 80);
+        ctx.strokeStyle = open ? S.color : "#555"; ctx.lineWidth = 2; ctx.strokeRect(x, y, 150, 80);
+        ctx.textAlign = "left"; ctx.fillStyle = open ? "white" : "#777"; ctx.font = "bold 15px sans-serif"; ctx.fillText(S.id, x + 8, y + 19);
         if (open) {
-            drawBossShape(S, x + 145, y + 45, S.size * 0.7);
-            ctx.font = "bold 16px sans-serif"; ctx.fillText(S.name, x + 10, y + 50);
-            ctx.font = "12px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(S.title, x + 10, y + 68);
-            ctx.fillStyle = i < storyProg ? "#4eef90" : "#ffe97a"; ctx.fillText(i < storyProg ? "✓ クリア済み" : "挑戦できます", x + 10, y + 87);
-        } else { ctx.font = "16px sans-serif"; ctx.fillText("？？？", x + 10, y + 55); ctx.font = "11px sans-serif"; ctx.fillText("前のステージをクリアで解放", x + 10, y + 87); }
+            drawBossShape(S, x + 122, y + 38, S.size * 0.5);
+            ctx.font = "bold 14px sans-serif"; ctx.fillText(S.name, x + 8, y + 40);
+            ctx.font = "11px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(S.title, x + 8, y + 56);
+            ctx.fillStyle = i < storyProg ? "#4eef90" : "#ffe97a"; ctx.fillText(i < storyProg ? "✓ クリア済み" : "挑戦できます", x + 8, y + 72);
+        } else { ctx.font = "14px sans-serif"; ctx.fillText("？？？", x + 8, y + 44); ctx.font = "10px sans-serif"; ctx.fillText("前をクリアで解放", x + 8, y + 72); }
     });
-    ctx.textAlign = "left"; ctx.fillStyle = "#aaa"; ctx.font = "16px sans-serif"; ctx.fillText("← 戻る", 20, 444); ctx.textAlign = "center";
+    ctx.textAlign = "left"; ctx.fillStyle = "#aaa"; ctx.font = "16px sans-serif"; ctx.fillText("← 戻る", 20, 446); ctx.textAlign = "center";
 }
 function drawStoryIntro() {
     const S = STAGES[storyStage];
@@ -1254,12 +1328,19 @@ function drawStoryIntro() {
     ctx.fillStyle = "#aaa"; ctx.font = "15px sans-serif"; ctx.fillText("タップで開始　（Escで戻る）", 400, 430);
 }
 function drawStoryFx() {   // 予告の印・レーザー・シールド・瞬間移動の光
-    for (const m of marks) { ctx.globalAlpha = 0.25 + 0.5 * (1 - m.t / m.max); ctx.fillStyle = "#ff6b6b"; ctx.fillRect(m.x, m.y, m.w, m.h); }
+    for (const m of marks) {
+        ctx.globalAlpha = 0.25 + 0.5 * (1 - m.t / m.max);
+        if (m.r) { ctx.strokeStyle = "#ff6bd6"; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.stroke(); }
+        else { ctx.fillStyle = "#ff6b6b"; ctx.fillRect(m.x, m.y, m.w, m.h); }
+    }
     ctx.globalAlpha = 1;
     if (laser) {
         const act = laser.t > laser.warn;
         ctx.strokeStyle = act ? "#ff4d4d" : "rgba(255,120,120,0.45)"; ctx.lineWidth = act ? 9 : 2;
-        ctx.beginPath(); ctx.moveTo(laser.ox, laser.oy); ctx.lineTo(laser.ox + Math.cos(laser.ang) * 1000, laser.oy + Math.sin(laser.ang) * 1000); ctx.stroke();
+        for (let k = 0; k < laser.arms; k++) {
+            const a = laser.ang + k * 2 * Math.PI / laser.arms;
+            ctx.beginPath(); ctx.moveTo(laser.ox, laser.oy); ctx.lineTo(laser.ox + Math.cos(a) * 1000, laser.oy + Math.sin(a) * 1000); ctx.stroke();
+        }
     }
     if (boss.shield) { ctx.strokeStyle = "#e6dcff"; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.w * 0.8, 0, Math.PI * 2); ctx.stroke(); }
     if (boss.flash > 0) { ctx.globalAlpha = boss.flash / 25; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.w * 0.9, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
