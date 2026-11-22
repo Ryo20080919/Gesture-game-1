@@ -157,7 +157,7 @@ window.addEventListener('keydown', e => {
         if (gameState === "playing") { gameState = "paused"; stick.x = stick.y = 0; } else if (gameState === "paused") gameState = "playing";
     }
     if (gameState === "mode" && (e.key === 'h' || e.key === 'H')) { helpPage = 0; gameState = "help"; }
-    if ((gameState === "help" || gameState === "ranking") && e.key === 'Escape') gameState = "mode";
+    if ((gameState === "help" || gameState === "ranking" || gameState === "gacha" || gameState === "equip") && e.key === 'Escape') gameState = "mode";
     if (gameState === "mode" && /^[1234]$/.test(e.key)) pickMode(+e.key - 1);
     else if (gameState === "select" && /^[1-9]$/.test(e.key)) chooseChar(+e.key - 1);
     else if (gameState === "bossSelect" && /^[1-4]$/.test(e.key)) startGame(+e.key - 1);
@@ -240,13 +240,14 @@ function chooseChar(i) {
     else gameState = story ? "storySelect" : "bossSelect";
 }
 function startGame(lv) {
-    setLayout('a');
+    setLayout('a'); bn = equipBonus(ch.id); costAcc = 0;   // 装備ボーナスを有効に
     bossLv = lv; bossCfg = BOSSES[lv];
     Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0 });
     Object.assign(boss, { x:650, y:340, vx:2.0, vy:0, w:bossCfg.size, h:bossCfg.size, hp:bossCfg.hp,
                           maxHp:bossCfg.hp, jumpPower:bossCfg.jump, moveTimer:0, atk:0, dropPlat:null, standing:null });
     bullets = []; bossBullets = []; clones = [];
     ammo = 30; shotCooldown = 0; bossShootCooldown = 0; currentGesture = "No Hand";
+    player.hp = maxHP();   // 最大HPの装備ボーナス
     gameState = "playing";
 }
 canvasElement.addEventListener('pointerdown', e => {
@@ -266,12 +267,15 @@ canvasElement.addEventListener('pointerdown', e => {
         const mx = (e.clientX - r0.left) * 800 / r0.width, my = (e.clientY - r0.top) * 450 / r0.height;
         if (my > 80 && my < 120) { showName(); return; }   // 名前の行をタップ → 名前変更
         if (my > 375) {   // 下のボタン：ランキング / あそびかた / ログイン
-            if (mx < 265) openRanking(); else if (mx < 515) { helpPage = 0; gameState = "help"; } else showAuth();
+            if (mx < 162) { gameState = "gacha"; gachaRes = []; gacha.giftNew = false; saveGacha(); } else if (mx < 319) { gameState = "equip"; eqPage = 0; }
+            else if (mx < 476) openRanking(); else if (mx < 633) { helpPage = 0; gameState = "help"; } else showAuth();
             return;
         }
         const idx = Math.max(0, Math.min(3, Math.floor((mx - 8) / 195)));
         pickMode(idx); return;
     }
+    if (gameState === "gacha") { gachaTap(e); return; }
+    if (gameState === "equip") { equipTap(e); return; }
     if (gameState === "storyIntro") { startStory(storyStage); return; }
     if (gameState === "storySelect") { storySelectTap(e); return; }
     if (gameState === "ranking") { gameState = "mode"; return; }
@@ -643,7 +647,7 @@ document.getElementById('btnJoin').addEventListener('click', joinRoom);
 document.getElementById('btnBack').addEventListener('click', () => { if (inRoom) { leaveRoom(); return; } closeNet(); gameState = "select"; });
 
 function startPvp() {
-    setLayout('a');
+    setLayout('a'); bn = ZERO;   // 対戦では装備の効果なし
     matching = false; clearTimeout(matchTimer);
     myRematch = oppRematch = oppLeft = false; mySelected = false; oppReady = false; inRoom = pvp && !online;
     settled = false; ratingNote = "";
@@ -734,7 +738,7 @@ function attack() {
         else if (g === "Scissors" && ammo >= 2) {
             for (const d of [-1, 1]) F({ y:y + d * 10, vx:5.5, baseYo:y + d * 10, angle:d > 0 ? 0 : Math.PI, power:8, type:'leaf' });
             ammo -= 2; shotCooldown = 26;
-        } else if (g === "Paper" && ammo >= 10 && player.hp < ch.hp) { player.hp = Math.min(ch.hp, player.hp + 25); ammo -= 10; shotCooldown = 90; }
+        } else if (g === "Paper" && ammo >= 10 && player.hp < maxHP()) { player.hp = Math.min(maxHP(), player.hp + 25); ammo -= 10; shotCooldown = 90; }
         break;
     case 'don': // 鬼：放物線の爆弾
         if (g === "Rock" && ammo >= 3) { F({ vx:8, vy:-5.5, grav:0.2, power:42, type:'bomb' }); ammo -= 3; shotCooldown = 55; }
@@ -810,7 +814,7 @@ function update() {
     if (gameState !== "playing") return;
     const gravity = 0.45;
 
-    const sp = player.speed * (player.haste > 0 ? 1.6 : 1);
+    const sp = player.speed * (player.haste > 0 ? 1.6 : 1) * (1 + bn.spd);
     const inp = pollInput();
     player.vx = 0;
     if (keys.left || inp.left) player.vx = -sp;
@@ -910,7 +914,7 @@ function update() {
             continue;
         }
         if (player.invuln <= 0 && Math.abs(bb.x - player.x) < (bb.hw || 5) + 15 && Math.abs(bb.y - player.y) < (bb.hh || 5) + 15) {
-            player.hp -= bb.dmg || 15;
+            player.hp -= Math.max(1, Math.round((bb.dmg || 15) * (1 - bn.def)));   // 防御の装備
             bossBullets.splice(i, 1);
             if (player.hp <= 0) { player.hp = 0; gameState = "gameover"; }
             continue;
@@ -920,12 +924,13 @@ function update() {
     }
 
     // プレイヤーの攻撃 & 弾薬回復
-    if (shotCooldown > 0) shotCooldown--;
+    if (shotCooldown > 0) shotCooldown = Math.max(0, shotCooldown - (1 + bn.rate));   // 連射の装備
     if (player.haste > 0) player.haste--;
     if (player.invuln > 0) player.invuln--;
     if (player.reflect > 0) player.reflect--;
-    if (currentGesture === "No Hand" && Math.random() < 0.25 && ammo < 30) ammo++;
-    attack();
+    if (currentGesture === "No Hand" && Math.random() < 0.25 * (1 + bn.regen) && ammo < 30) ammo++;   // マナ回復の装備
+    const a0 = ammo; attack();
+    if (bn.cost && ammo < a0) { costAcc += (a0 - ammo) * bn.cost; while (costAcc >= 1) { costAcc--; ammo = Math.min(30, ammo + 1); } }   // マナ消費をおさえる装備
 
     for (let i = bullets.length - 1; i >= 0; i--) {
         const b = bullets[i];
@@ -950,7 +955,7 @@ function update() {
             if (!b.hit) { // 貫通弾は1発につき1回だけダメージ（シールド中は無効）
                 b.hit = true;
                 if (!boss.shield) {
-                    boss.hp -= b.power;
+                    boss.hp -= Math.max(1, Math.round(b.power * (1 + bn.atk)));   // 攻撃力の装備
                     if (boss.hp <= 0) { boss.hp = 0; gameState = "clear"; if (story) storyCleared(); }
                 }
             }
@@ -1055,10 +1060,11 @@ function drawOpp() {
 
 let helpPage = 0;
 const HELP = [
- { t:"あそびかた（1/4）", l:["手の形（グー・チョキ・パー）をカメラに見せて、","精霊と戦うシューティングバトルです。","","・手の形ごとに技が変わり、技はマナを消費します。","・手をカメラから外すと、マナが回復します。","・相手のHPを先に0にすれば勝ち、自分が0なら負け。"] },
- { t:"操作（2/4）", l:["・移動：スティック／十字キーを左右に倒す","・ジャンプ：45度以上、上に倒す","・降りる：足場の上で45度以上、下に倒す","　（倒し続けると、続けて下の足場まで降ります）","・画面のどこを押しても、その場にスティックが出ます","・キーボードは矢印キー／WASD、ゲームパッドも使えます","・練習・ストーリー中は右上の「ポーズ」（Escキー）で戻れます"] },
- { t:"モード（3/4）", l:["・練習：好きな精霊（Lv1〜4）と、ひとりで自由に戦います。","　レベルが上がるほど強くなります。","・友達と対戦：片方が「ルームを作る」で出た4桁コードを、","　もう片方が入力して接続します。","　終わったあとも部屋に残り、「もう一度対戦」か「ルームを出る」を選べます。","・オンライン対戦：レートの近い相手を探して対戦します。","　勝つとレートが上がり、負けると下がります。","・キャラは8体。技はキャラごとに違います。"] },
- { t:"ストーリー（4/4）", l:["・ステージ1-1から5-4まで、全20ステージ。順に新しい敵に挑みます。","・敵を倒すと、次のステージが解放されます。","・敵の体力は、少しずつ増えていきます。（最後は1000）","・ワールドごとにマップ（足場）と色が変わります。","・敵ごとに動きと攻撃がまったく違います。","　（光の雨・衝撃波・瞬間移動・つらら・鬼火・炎の柱・レーザー…）","・進み具合は、この端末に保存されます。"] }
+ { t:"あそびかた（1/5）", l:["手の形（グー・チョキ・パー）をカメラに見せて、","精霊と戦うシューティングバトルです。","","・手の形ごとに技が変わり、技はマナを消費します。","・手をカメラから外すと、マナが回復します。","・相手のHPを先に0にすれば勝ち、自分が0なら負け。"] },
+ { t:"操作（2/5）", l:["・移動：スティック／十字キーを左右に倒す","・ジャンプ：45度以上、上に倒す","・降りる：足場の上で45度以上、下に倒す","　（倒し続けると、続けて下の足場まで降ります）","・画面のどこを押しても、その場にスティックが出ます","・キーボードは矢印キー／WASD、ゲームパッドも使えます","・練習・ストーリー中は右上の「ポーズ」（Escキー）で戻れます"] },
+ { t:"モード（3/5）", l:["・練習：好きな精霊（Lv1〜4）と、ひとりで自由に戦います。","　レベルが上がるほど強くなります。","・友達と対戦：片方が「ルームを作る」で出た4桁コードを、","　もう片方が入力して接続します。","　終わったあとも部屋に残り、「もう一度対戦」か「ルームを出る」を選べます。","・オンライン対戦：レートの近い相手を探して対戦します。","　勝つとレートが上がり、負けると下がります。","・キャラは8体。技はキャラごとに違います。"] },
+ { t:"ストーリー（4/5）", l:["・ステージ1-1から5-4まで、全20ステージ。順に新しい敵に挑みます。","・敵を倒すと、次のステージが解放されます。","・敵の体力は、少しずつ増えていきます。（最後は1000）","・ワールドごとにマップ（足場）と色が変わります。","・敵ごとに動きと攻撃がまったく違います。","　（光の雨・衝撃波・瞬間移動・つらら・鬼火・炎の柱・レーザー…）","・進み具合は、この端末に保存されます。"] },
+ { t:"ガチャと装備（5/5）", l:["・ストーリーのステージをクリアすると、「精霊のかけら」がもらえます。","　（初めてのクリア+150、2回目以降+50）","・かけら100で、ガチャを1回。1000で10連（SR以上が1つ確定）。","・ガチャで、武器・防具・アクセサリの装備が手に入ります。","・メニューの「装備」で、キャラごとに付けられます。","・効果：攻撃力・受けるダメージ・最大HP・移動・連射・マナ回復など。","・装備の効果は、練習とストーリーで有効です（対戦では使われません）。"] }
 ];
 function drawHelp() {
     const p = HELP[helpPage];
@@ -1271,7 +1277,7 @@ function storyTick() {   // ストーリーの敵の仕掛け（予告・レー�
             for (let k = 0; k < laser.arms; k++) {   // 回転するレーザー（arms本）
                 const a = laser.ang + k * 2 * Math.PI / laser.arms, dx = Math.cos(a), dy = Math.sin(a);
                 if (px * dx + py * dy > 0 && Math.abs(px * dy - py * dx) < 16) {
-                    player.hp -= Math.round(18 * (bossCfg.dm || 1)); player.hurtCd = 30;
+                    player.hp -= Math.max(1, Math.round(18 * (bossCfg.dm || 1) * (1 - bn.def))); player.hurtCd = 30;
                     if (player.hp <= 0) { player.hp = 0; gameState = "gameover"; }
                     break;
                 }
@@ -1286,36 +1292,40 @@ function startStory(i) {
     marks = []; sched = []; laser = null; player.hurtCd = 0;
 }
 function storyCleared() {
+    const first = storyStage >= storyProg;   // 初めてのクリアか
     storyProg = Math.min(STAGES.length, Math.max(storyProg, storyStage + 1));
     try { localStorage.setItem('spiritarena-story', String(storyProg)); } catch (e) {}
+    const gain = first ? 150 : 50;   // かけら：初クリア+150 / 2回目以降+50
+    gacha.coins += gain; saveGacha();
+    rewardNote = `精霊のかけら +${gain}（所持 ${gacha.coins}）`;
 }
 const storyClearText = () => bossCfg.last ? 'すべてのステージをクリア！ ありがとう！' : `${bossCfg.name}を倒した！ 次のステージが解放されました`;
 function storySelectTap(e) {
     const r = canvasElement.getBoundingClientRect();
     const x = (e.clientX - r.left) * 800 / r.width, y = (e.clientY - r.top) * 450 / r.height;
-    if (x < 150 && y > 432) { gameState = "select"; return; }
+    if (x < 150 && y > 436) { gameState = "select"; return; }
     STAGES.forEach((S, i) => {
-        const cx = 10 + ((i / 4) | 0) * 155, cy = 85 + (i % 4) * 88;
-        if (x >= cx && x <= cx + 150 && y >= cy && y <= cy + 80 && i <= storyProg) { storyStage = i; gameState = "storyIntro"; }
+        const cx = 120 + (i % 4) * 170, cy = 62 + ((i / 4) | 0) * 76;
+        if (x >= cx && x <= cx + 165 && y >= cy && y <= cy + 68 && i <= storyProg) { storyStage = i; gameState = "storyIntro"; }
     });
 }
-function drawStorySelect() {
-    ctx.textAlign = "center"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 24px sans-serif"; ctx.fillText("ストーリー", 400, 26);
-    ctx.fillStyle = "white"; ctx.font = "13px sans-serif"; ctx.fillText(`使用キャラ: ${ch.name}　挑むステージをえらんでください（全${STAGES.length}ステージ）`, 400, 48);
+function drawStorySelect() {   // 1行 = 1ワールド。1-1・1-2・1-3・1-4 が横に並ぶ
+    ctx.textAlign = "center"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 22px sans-serif"; ctx.fillText("ストーリー", 400, 24);
+    ctx.fillStyle = "white"; ctx.font = "12px sans-serif"; ctx.fillText(`使用キャラ: ${ch.name}　挑むステージをえらんでください（全${STAGES.length}ステージ）`, 400, 46);
     STAGES.forEach((S, i) => {
-        const x = 10 + ((i / 4) | 0) * 155, y = 85 + (i % 4) * 88, open = i <= storyProg;
-        if (i % 4 === 0) { ctx.textAlign = "left"; ctx.fillStyle = "#9fd"; ctx.font = "bold 13px sans-serif"; ctx.fillText(`W${i / 4 + 1} ${S.world}`, x, 74); }
-        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, y, 150, 80);
-        ctx.strokeStyle = open ? S.color : "#555"; ctx.lineWidth = 2; ctx.strokeRect(x, y, 150, 80);
+        const x = 120 + (i % 4) * 170, y = 62 + ((i / 4) | 0) * 76, open = i <= storyProg;
+        if (i % 4 === 0) { ctx.textAlign = "left"; ctx.fillStyle = "#9fd"; ctx.font = "bold 13px sans-serif"; ctx.fillText(`WORLD ${i / 4 + 1}`, 10, y + 28); ctx.font = "12px sans-serif"; ctx.fillStyle = "#cfe"; ctx.fillText(S.world, 10, y + 48); }
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, y, 165, 68);
+        ctx.strokeStyle = open ? S.color : "#555"; ctx.lineWidth = 2; ctx.strokeRect(x, y, 165, 68);
         ctx.textAlign = "left"; ctx.fillStyle = open ? "white" : "#777"; ctx.font = "bold 15px sans-serif"; ctx.fillText(S.id, x + 8, y + 19);
         if (open) {
-            drawBossShape(S, x + 122, y + 38, S.size * 0.5);
-            ctx.font = "bold 14px sans-serif"; ctx.fillText(S.name, x + 8, y + 40);
-            ctx.font = "11px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(S.title, x + 8, y + 56);
-            ctx.fillStyle = i < storyProg ? "#4eef90" : "#ffe97a"; ctx.fillText(i < storyProg ? "✓ クリア済み" : "挑戦できます", x + 8, y + 72);
-        } else { ctx.font = "14px sans-serif"; ctx.fillText("？？？", x + 8, y + 44); ctx.font = "10px sans-serif"; ctx.fillText("前をクリアで解放", x + 8, y + 72); }
+            drawBossShape(S, x + 135, y + 34, S.size * 0.5);
+            ctx.font = "bold 14px sans-serif"; ctx.fillText(S.name, x + 8, y + 38);
+            ctx.font = "11px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(S.title, x + 8, y + 53);
+            ctx.fillStyle = i < storyProg ? "#4eef90" : "#ffe97a"; ctx.fillText(i < storyProg ? "✓ クリア済み" : "挑戦できます", x + 8, y + 65);
+        } else { ctx.font = "14px sans-serif"; ctx.fillText("？？？", x + 8, y + 42); ctx.font = "10px sans-serif"; ctx.fillText("前をクリアで解放", x + 8, y + 62); }
     });
-    ctx.textAlign = "left"; ctx.fillStyle = "#aaa"; ctx.font = "16px sans-serif"; ctx.fillText("← 戻る", 20, 446); ctx.textAlign = "center";
+    ctx.textAlign = "left"; ctx.fillStyle = "#aaa"; ctx.font = "16px sans-serif"; ctx.fillText("← 戻る", 20, 448); ctx.textAlign = "center";
 }
 function drawStoryIntro() {
     const S = STAGES[storyStage];
@@ -1346,12 +1356,137 @@ function drawStoryFx() {   // 予告の印・レーザー・シールド・瞬�
     if (boss.flash > 0) { ctx.globalAlpha = boss.flash / 25; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.w * 0.9, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; }
 }
 
+// ===== ガチャと装備 =====
+// 通貨「精霊のかけら」：ストーリーのステージをクリアすると増える（初回クリア+150、2回目以降+50）。ガチャ1回=100。
+// 装備は 武器・防具・アクセサリ の3枠。効果は「練習」「ストーリー」で有効（対戦では使われない）。
+const EQ = [
+ { b:'sword',  name:'つるぎ',   slot:'w', fx:{ atk:1 } },
+ { b:'bow',    name:'ゆみ',     slot:'w', fx:{ rate:1 } },
+ { b:'shield', name:'たて',     slot:'a', fx:{ def:1 } },
+ { b:'robe',   name:'ローブ',   slot:'a', fx:{ hp:1 } },
+ { b:'boots',  name:'くつ',     slot:'x', fx:{ spd:1 } },
+ { b:'ring',   name:'ゆびわ',   slot:'x', fx:{ regen:1 } },
+ { b:'charm',  name:'おまもり', slot:'x', fx:{ atk:0.5, def:0.5 } },
+ { b:'band',   name:'うでわ',   slot:'x', fx:{ cost:1 } }
+];
+const RAR = [{ k:'N', color:'#b8b8b8', pre:'ふつうの' }, { k:'R', color:'#6fd3ff', pre:'すぐれた' }, { k:'SR', color:'#c68bff', pre:'精霊の' }, { k:'SSR', color:'#ffd24d', pre:'伝説の' }];
+const MAG = {   // レアリティ別の効果の大きさ（N / R / SR / SSR）
+    atk:[0.04, 0.07, 0.10, 0.15], def:[0.04, 0.07, 0.10, 0.15], rate:[0.05, 0.08, 0.12, 0.18], hp:[0.05, 0.08, 0.12, 0.18],
+    spd:[0.04, 0.06, 0.09, 0.12], regen:[0.10, 0.18, 0.28, 0.40], cost:[0.05, 0.08, 0.12, 0.18]
+};
+const FXL = { atk:'攻撃力', def:'受けるダメージ', rate:'連射', hp:'最大HP', spd:'移動速度', regen:'マナ回復', cost:'マナ消費' };
+const SLOTS = [['w', '武器'], ['a', '防具'], ['x', 'アクセサリ']];
+const ZERO = { atk:0, def:0, hp:0, spd:0, regen:0, rate:0, cost:0 };
+let bn = ZERO, rewardNote = '', gachaRes = [], eqChar = 0, eqSlot = 'w', eqPage = 0, costAcc = 0;   // bn = いま有効な装備ボーナス
+let gacha = { coins:1000, inv:[], eq:{}, seq:0, giftNew:true };   // 初回だけ、確認用に1000（10回分）を配布
+try { const d = JSON.parse(localStorage.getItem('spiritarena-gacha')); if (d && d.inv) gacha = d; } catch (e) {}
+const saveGacha = () => { try { localStorage.setItem('spiritarena-gacha', JSON.stringify(gacha)); } catch (e) {} };
+const maxHP = () => Math.round(ch.hp * (1 + bn.hp));
+const itemDef = it => EQ.find(d => d.b === it.b);
+const itemName = it => RAR[it.r].pre + itemDef(it).name;
+const itemFx = it => { const o = {}, d = itemDef(it); for (const k in d.fx) o[k] = d.fx[k] * MAG[k][it.r]; return o; };
+const fxText = o => Object.keys(o).filter(k => o[k] > 0).map(k => `${FXL[k]}${k === 'def' || k === 'cost' ? ' -' : ' +'}${Math.round(o[k] * 100)}%`).join('　');
+function equipBonus(cid) {
+    const b = Object.assign({}, ZERO), e = gacha.eq[cid] || {};
+    for (const [s] of SLOTS) { const it = gacha.inv.find(v => v.u === e[s]); if (it) { const f = itemFx(it); for (const k in f) b[k] += f[k]; } }
+    return b;
+}
+function rollItem(minR) {   // 排出率：N 60% / R 28% / SR 10% / SSR 2%
+    let r; do { const x = Math.random(); r = x < 0.02 ? 3 : x < 0.12 ? 2 : x < 0.40 ? 1 : 0; } while (r < (minR || 0));
+    return { u: ++gacha.seq, b: EQ[(Math.random() * EQ.length) | 0].b, r };
+}
+function doPull(n) {   // 1回=100 / 10連=1000（10連はSR以上が1つ確定）
+    if (gacha.coins < n * 100) return false;
+    gacha.coins -= n * 100; gachaRes = [];
+    for (let i = 0; i < n; i++) gachaRes.push(rollItem(n === 10 && i === 9 ? 2 : 0));
+    gacha.inv.push(...gachaRes); saveGacha(); return true;
+}
+function ownerOf(u) { for (const cid in gacha.eq) for (const s in gacha.eq[cid]) if (gacha.eq[cid][s] === u) return cid; return null; }
+const slotItems = () => gacha.inv.filter(it => itemDef(it).slot === eqSlot).sort((a, b) => b.r - a.r || a.u - b.u);
+function equipItem(it) {   // 他のキャラが装備中なら、そのキャラから外してこのキャラへ
+    const o = ownerOf(it.u); if (o) { for (const s in gacha.eq[o]) if (gacha.eq[o][s] === it.u) delete gacha.eq[o][s]; }
+    const cid = CHARS[eqChar].id; (gacha.eq[cid] = gacha.eq[cid] || {})[eqSlot] = it.u; saveGacha();
+}
+const canvasPos = e => { const r = canvasElement.getBoundingClientRect(); return [(e.clientX - r.left) * 800 / r.width, (e.clientY - r.top) * 450 / r.height]; };
+const inBox = (x, y, bx, by, w, h) => x >= bx && x <= bx + w && y >= by && y <= by + h;
+function itemCard(it, x, y, w, h, tag) {
+    const c = RAR[it.r].color;
+    ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, y, w, h); ctx.strokeStyle = c; ctx.lineWidth = it.r === 3 ? 3 : 2; ctx.strokeRect(x, y, w, h);
+    ctx.textAlign = "left"; ctx.fillStyle = c; ctx.font = "bold 13px sans-serif"; ctx.fillText(RAR[it.r].k, x + 6, y + 16);
+    ctx.fillStyle = "white"; ctx.font = "bold 13px sans-serif"; ctx.fillText(itemName(it), x + 38, y + 16);
+    ctx.fillStyle = "#cde"; ctx.font = "11px sans-serif"; ctx.fillText(fxText(itemFx(it)), x + 6, y + 34);
+    if (tag) { ctx.fillStyle = "#ffb347"; ctx.fillText(tag, x + 6, y + h - 6); }
+}
+function drawGacha() {
+    ctx.textAlign = "center"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 28px sans-serif"; ctx.fillText("ガチャ", 400, 34);
+    ctx.textAlign = "right"; ctx.font = "bold 16px sans-serif"; ctx.fillText(`精霊のかけら ${gacha.coins}`, 790, 26);
+    ctx.textAlign = "center"; ctx.fillStyle = "#cde"; ctx.font = "12px sans-serif"; ctx.fillText("N 60% ／ R 28% ／ SR 10% ／ SSR 2%　（10連は SR以上が1つ確定）", 400, 56);
+    [[150, 1, '1回まわす', 100], [430, 10, '10連（SR以上1つ確定）', 1000]].forEach(([x, n, label, cost]) => {
+        const ok = gacha.coins >= cost;
+        ctx.fillStyle = ok ? "#2c4a34" : "#2a2a2a"; ctx.fillRect(x, 70, 220, 56);
+        ctx.strokeStyle = ok ? "#ffe97a" : "#666"; ctx.lineWidth = 2; ctx.strokeRect(x, 70, 220, 56);
+        ctx.fillStyle = ok ? "white" : "#888"; ctx.font = "bold 17px sans-serif"; ctx.fillText(label, x + 110, 96); ctx.font = "13px sans-serif"; ctx.fillText(`かけら ${cost}`, x + 110, 116);
+    });
+    ctx.textAlign = "center";
+    if (!gachaRes.length) { ctx.fillStyle = "#9ab"; ctx.font = "14px sans-serif"; ctx.fillText("ガチャをまわすと、装備が手に入ります。", 400, 240); ctx.fillText("ストーリーのステージをクリアすると、かけらがもらえます。", 400, 266); }
+    else if (gachaRes.length === 1) itemCard(gachaRes[0], 280, 170, 240, 80);
+    else gachaRes.forEach((it, i) => itemCard(it, 25 + (i % 5) * 152, 150 + ((i / 5) | 0) * 100, 146, 90));
+    ctx.textAlign = "center"; ctx.fillStyle = "#9ab"; ctx.font = "12px sans-serif"; ctx.fillText("装備は、メニューの「装備」からキャラに付けられます。効果は練習・ストーリーで有効（対戦では使われません）", 400, 400);
+    ctx.textAlign = "left"; ctx.fillStyle = "#aaa"; ctx.font = "16px sans-serif"; ctx.fillText("← 戻る", 20, 440); ctx.textAlign = "center";
+}
+function gachaTap(e) {
+    const [x, y] = canvasPos(e);
+    if (x < 150 && y > 420) { gameState = "mode"; return; }
+    if (inBox(x, y, 150, 70, 220, 56)) doPull(1); else if (inBox(x, y, 430, 70, 220, 56)) doPull(10);
+}
+function drawEquip() {
+    const c = CHARS[eqChar], bon = equipBonus(c.id), e = gacha.eq[c.id] || {};
+    ctx.textAlign = "center"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 20px sans-serif"; ctx.fillText("装備", 400, 24);
+    CHARS.forEach((cc, i) => {
+        const x = 8 + i * 98;
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, 34, 94, 50); ctx.strokeStyle = i === eqChar ? "#ffe97a" : cc.color; ctx.lineWidth = i === eqChar ? 3 : 1.5; ctx.strokeRect(x, 34, 94, 50);
+        drawShape(cc.shape, x + 22, 59, 11, cc.color, 1); ctx.textAlign = "left"; ctx.fillStyle = "white"; ctx.font = "bold 12px sans-serif"; ctx.fillText(cc.name, x + 38, 63);
+    });
+    SLOTS.forEach(([s, label], i) => {
+        const x = 10 + i * 262, it = gacha.inv.find(v => v.u === e[s]);
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, 92, 250, 68); ctx.strokeStyle = s === eqSlot ? "#ffe97a" : "#4a6a54"; ctx.lineWidth = s === eqSlot ? 3 : 1.5; ctx.strokeRect(x, 92, 250, 68);
+        ctx.textAlign = "left"; ctx.fillStyle = "#9fd"; ctx.font = "bold 12px sans-serif"; ctx.fillText(label, x + 8, 110);
+        if (it) { ctx.fillStyle = RAR[it.r].color; ctx.font = "bold 14px sans-serif"; ctx.fillText(`${RAR[it.r].k}  ${itemName(it)}`, x + 8, 130); ctx.fillStyle = "#cde"; ctx.font = "11px sans-serif"; ctx.fillText(fxText(itemFx(it)), x + 8, 148); }
+        else { ctx.fillStyle = "#789"; ctx.font = "13px sans-serif"; ctx.fillText("（そうびなし）", x + 8, 136); }
+    });
+    const items = slotItems(), pages = Math.max(1, Math.ceil(items.length / 12)); eqPage = Math.min(eqPage, pages - 1);
+    ctx.textAlign = "left"; ctx.fillStyle = "#9fd"; ctx.font = "12px sans-serif"; ctx.fillText(`${SLOTS.find(s => s[0] === eqSlot)[1]}の所持装備（タップで装備。他のキャラが装備中のものは、ここへ移せます）`, 10, 178);
+    items.slice(eqPage * 12, eqPage * 12 + 12).forEach((it, k) => {
+        const o = ownerOf(it.u), tag = o ? (o === c.id ? '装備中' : `${CHARS.find(v => v.id === o).name}が装備中`) : '';
+        itemCard(it, 10 + (k % 4) * 198, 184 + ((k / 4) | 0) * 64, 192, 58, tag);
+    });
+    ctx.textAlign = "center";
+    if (!items.length) { ctx.fillStyle = "#9ab"; ctx.font = "14px sans-serif"; ctx.fillText("この種類の装備は、まだありません。ガチャでゲットしよう！", 400, 280); }
+    ctx.fillStyle = "#ffe97a"; ctx.font = "13px sans-serif"; ctx.fillText(`${c.name}の装備ボーナス：${fxText(bon) || 'なし'}`, 400, 396);
+    const btn = (x, w, t, on) => { ctx.fillStyle = on ? "#2c4a34" : "#2a2a2a"; ctx.fillRect(x, 408, w, 32); ctx.strokeStyle = on ? "#4eef90" : "#555"; ctx.lineWidth = 2; ctx.strokeRect(x, 408, w, 32); ctx.fillStyle = on ? "white" : "#777"; ctx.font = "bold 14px sans-serif"; ctx.textAlign = "center"; ctx.fillText(t, x + w / 2, 429); };
+    btn(10, 110, "← 戻る", true); btn(290, 70, "◀", eqPage > 0); btn(440, 70, "▶", eqPage < pages - 1); btn(600, 190, "はずす", !!e[eqSlot]);
+    ctx.fillStyle = "#ccc"; ctx.font = "13px sans-serif"; ctx.textAlign = "center"; ctx.fillText(`${eqPage + 1} / ${pages}`, 400, 429);
+}
+function equipTap(e) {
+    const [x, y] = canvasPos(e), c = CHARS[eqChar];
+    if (inBox(x, y, 10, 408, 110, 32)) { gameState = "mode"; return; }
+    CHARS.forEach((cc, i) => { if (inBox(x, y, 8 + i * 98, 34, 94, 50)) { eqChar = i; eqPage = 0; } });
+    SLOTS.forEach(([s], i) => { if (inBox(x, y, 10 + i * 262, 92, 250, 68)) { eqSlot = s; eqPage = 0; } });
+    const items = slotItems(), pages = Math.max(1, Math.ceil(items.length / 12));
+    if (inBox(x, y, 290, 408, 70, 32) && eqPage > 0) eqPage--;
+    if (inBox(x, y, 440, 408, 70, 32) && eqPage < pages - 1) eqPage++;
+    if (inBox(x, y, 600, 408, 190, 32)) { if (gacha.eq[c.id]) { delete gacha.eq[c.id][eqSlot]; saveGacha(); } }
+    items.slice(eqPage * 12, eqPage * 12 + 12).forEach((it, k) => { if (inBox(x, y, 10 + (k % 4) * 198, 184 + ((k / 4) | 0) * 64, 192, 58)) equipItem(it); });
+}
+
 function drawMode() {
     ctx.textAlign = "center";
     ctx.fillStyle = "#4eef90"; ctx.font = "bold 34px sans-serif";
     ctx.fillText("SPIRIT ARENA 精霊の闘技場", 400, 70);
     ctx.fillStyle = "#ffe97a"; ctx.font = "16px sans-serif"; ctx.fillText(`${playerName()}　オンライン レート ${rating}（${wins}勝 ${losses}敗）  ✎`, 400, 98);
     if (abandonNote) { ctx.fillStyle = "#ff9a9a"; ctx.font = "13px sans-serif"; ctx.fillText(abandonNote, 400, 114); }
+    ctx.textAlign = "right"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 14px sans-serif"; ctx.fillText(`精霊のかけら ${gacha.coins}`, 790, 24); ctx.textAlign = "center";
+    if (gacha.giftNew && !abandonNote) { ctx.fillStyle = "#ffe97a"; ctx.font = "13px sans-serif"; ctx.fillText("ガチャのお試し用に、精霊のかけら1000（10回分）を配布しました！「ガチャ」へ", 400, 116); }
     [["1. 練習", "ボスと自由に戦う", "#ff9955"], ["2. ストーリー", "ステージを進める", "#ffe97a"], ["3. 友達と対戦", "コードでつなぐ", "#4ea8ff"], ["4. オンライン", "レートの近い人と", "#b0a0ff"]].forEach((m, i) => {
         const x = 15 + i * 195;
         ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, 120, 185, 240);
@@ -1359,10 +1494,10 @@ function drawMode() {
         ctx.fillStyle = "white"; ctx.font = "bold 20px sans-serif"; ctx.fillText(m[0], x + 92, 220);
         ctx.font = "14px sans-serif"; ctx.fillStyle = "#ccc"; ctx.fillText(m[1], x + 92, 262);
     });
-    [[40, "ランキング"], [290, "？ あそびかた（H）"], [540, user ? "アカウント" : "ログイン"]].forEach(([bx, t]) => {
-        ctx.fillStyle = "#1b2d24"; ctx.fillRect(bx, 385, 220, 40);
-        ctx.strokeStyle = "#4eef90"; ctx.lineWidth = 2; ctx.strokeRect(bx, 385, 220, 40);
-        ctx.fillStyle = "white"; ctx.font = "bold 18px sans-serif"; ctx.fillText(t, bx + 110, 412);
+    [[10, "ガチャ"], [167, "装備"], [324, "ランキング"], [481, "あそびかた"], [638, user ? "アカウント" : "ログイン"]].forEach(([bx, t]) => {
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(bx, 385, 150, 40);
+        ctx.strokeStyle = bx < 300 ? "#ffe97a" : "#4eef90"; ctx.lineWidth = 2; ctx.strokeRect(bx, 385, 150, 40);
+        ctx.fillStyle = "white"; ctx.font = "bold 16px sans-serif"; ctx.fillText(t, bx + 75, 411);
     });
 }
 
@@ -1485,6 +1620,8 @@ function draw() {
     if (gameState === "ranking") { drawRanking(); return; }
     if (gameState === "help") { drawHelp(); return; }
     if (gameState === "mode") { drawMode(); return; }
+    if (gameState === "gacha") { drawGacha(); return; }
+    if (gameState === "equip") { drawEquip(); return; }
     if (gameState === "storyIntro") { drawStoryIntro(); return; }
     if (gameState === "storySelect") { drawStorySelect(); return; }
     if (gameState === "versus") { drawVersus(); return; }
@@ -1564,7 +1701,7 @@ function draw() {
             ctx.font = "bold 11px sans-serif"; ctx.textAlign = "center"; ctx.fillStyle = "white";
             ctx.fillText(`${Math.max(0, Math.ceil(cur))}/${max}`, x + w / 2, y + 12);
         };
-        bar(10, 28, 150, player.hp, ch.hp);
+        bar(10, 28, 150, player.hp, maxHP());
         ctx.textAlign = "left"; ctx.font = "bold 13px sans-serif"; ctx.fillStyle = "white"; ctx.fillText("HP", 168, 41);
         bar(640, 8, 150, pvp ? opp.hp : boss.hp, pvp ? oppCh.hp : boss.maxHp, "#ff6b8a");
         ctx.textAlign = "right"; ctx.fillText(pvp ? oppName : story ? bossCfg.name : `${BOSSES[bossLv].sub} Lv${bossLv + 1}`, 790, 38);
@@ -1572,6 +1709,7 @@ function draw() {
     if (gameState === "paused") drawPause();
     if (gameState === "clear") overlay(pvp ? "YOU WIN!!" : story ? `STAGE ${bossCfg.id} CLEAR!!` : "VICTORY!!", "#4eef90", pvp ? (netNote || `${oppName}に勝ちました！`) : (story ? storyClearText() : "精霊を鎮めました！おめでとう！"));
     else if (gameState === "gameover") overlay(pvp ? "YOU LOSE..." : "DEFEAT...", "#ff5555", pvp ? `${oppName}に負けました...` : "精霊の力に倒れてしまった...");
+    if (story && !pvp && gameState === "clear" && rewardNote) { ctx.fillStyle = "#ffe97a"; ctx.font = "bold 22px sans-serif"; ctx.textAlign = "center"; ctx.fillText(rewardNote, 400, 340); }
     if (online && pvp && ratingNote && (gameState === "clear" || gameState === "gameover")) {
         ctx.fillStyle = "#ffe97a"; ctx.font = "bold 22px sans-serif"; ctx.textAlign = "center"; ctx.fillText(ratingNote, 400, 340);
     }
