@@ -598,6 +598,7 @@ function becomeWaiter() {
         if (taken) { c.on('open', () => c.close()); return; }
         taken = true;
         isHost = true; matchId = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);   // 試合ID（待機役が決める）
+        pvpMap = 'abcdefgh'[(Math.random() * 8) | 0];   // 今回のマップ（ランダム。相手にも伝える）
         const room = 'spiritarena-' + Math.random().toString(36).slice(2, 8);
         const host = peer = new Peer(room);
         host.on('connection', setupConn);
@@ -609,7 +610,7 @@ function becomeWaiter() {
         });
     });
 }
-function sayHello() { if (conn && conn.open && !sentHello) { sentHello = true; conn.send({ t:'hello', ch:ch.id, r:rating, name:playerName(), uid:user ? user.id : null, mid:matchId }); } }
+function sayHello() { if (conn && conn.open && !sentHello) { sentHello = true; conn.send({ t:'hello', ch:ch.id, r:rating, name:playerName(), uid:user ? user.id : null, mid:matchId, map:pvpMap }); } }
 function setupConn(c) {
     conn = c;
     c.on('open', sayHello);
@@ -647,7 +648,7 @@ document.getElementById('btnJoin').addEventListener('click', joinRoom);
 document.getElementById('btnBack').addEventListener('click', () => { if (inRoom) { leaveRoom(); return; } closeNet(); gameState = "select"; });
 
 function startPvp() {
-    setLayout('a'); bn = ZERO;   // 対戦では装備の効果なし
+    setLayout(online ? pvpMap : 'a'); bn = ZERO;   // 対戦では装備の効果なし
     matching = false; clearTimeout(matchTimer);
     myRematch = oppRematch = oppLeft = false; mySelected = false; oppReady = false; inRoom = pvp && !online;
     settled = false; ratingNote = "";
@@ -663,7 +664,7 @@ function startPvp() {
 
 function onData(m) {
     if (m.t === 'hello') {
-        oppCh = CHARS.find(c => c.id === m.ch) || CHARS[0]; oppRating = m.r || 1000; oppName = cleanName(m.name) || '相手'; oppUid = m.uid || null; if (m.mid && !isHost) matchId = m.mid;
+        oppCh = CHARS.find(c => c.id === m.ch) || CHARS[0]; oppRating = m.r || 1000; oppName = cleanName(m.name) || '相手'; oppUid = m.uid || null; if (m.mid && !isHost) matchId = m.mid; if (m.map && !isHost && MAPNAMES[m.map]) pvpMap = m.map;
         oppReady = true;
         if (inRoom && !mySelected) return;   // 再戦のキャラ選択中：自分が選び終えたら始める
         sayHello();
@@ -928,7 +929,7 @@ function update() {
     if (player.haste > 0) player.haste--;
     if (player.invuln > 0) player.invuln--;
     if (player.reflect > 0) player.reflect--;
-    if (currentGesture === "No Hand" && Math.random() < 0.25 * (1 + bn.regen) && ammo < 30) ammo++;   // マナ回復の装備
+    if (currentGesture === "No Hand" && Math.random() < 0.18 * (1 + bn.regen) && ammo < 30) ammo++;   // マナ回復の装備
     const a0 = ammo; attack();
     if (bn.cost && ammo < a0) { costAcc += (a0 - ammo) * bn.cost; while (costAcc >= 1) { costAcc--; ammo = Math.min(30, ammo + 1); } }   // マナ消費をおさえる装備
 
@@ -1062,7 +1063,7 @@ let helpPage = 0;
 const HELP = [
  { t:"あそびかた（1/5）", l:["手の形（グー・チョキ・パー）をカメラに見せて、","精霊と戦うシューティングバトルです。","","・手の形ごとに技が変わり、技はマナを消費します。","・手をカメラから外すと、マナが回復します。","・相手のHPを先に0にすれば勝ち、自分が0なら負け。"] },
  { t:"操作（2/5）", l:["・移動：スティック／十字キーを左右に倒す","・ジャンプ：45度以上、上に倒す","・降りる：足場の上で45度以上、下に倒す","　（倒し続けると、続けて下の足場まで降ります）","・画面のどこを押しても、その場にスティックが出ます","・キーボードは矢印キー／WASD、ゲームパッドも使えます","・練習・ストーリー中は右上の「ポーズ」（Escキー）で戻れます"] },
- { t:"モード（3/5）", l:["・練習：好きな精霊（Lv1〜4）と、ひとりで自由に戦います。","　レベルが上がるほど強くなります。","・友達と対戦：片方が「ルームを作る」で出た4桁コードを、","　もう片方が入力して接続します。","　終わったあとも部屋に残り、「もう一度対戦」か「ルームを出る」を選べます。","・オンライン対戦：レートの近い相手を探して対戦します。","　勝つとレートが上がり、負けると下がります。","・キャラは8体。技はキャラごとに違います。"] },
+ { t:"モード（3/5）", l:["・練習：好きな精霊（Lv1〜4）と、ひとりで自由に戦います。","　レベルが上がるほど強くなります。","・友達と対戦：片方が「ルームを作る」で出た4桁コードを、","　もう片方が入力して接続します。","　終わったあとも部屋に残り、「もう一度対戦」か「ルームを出る」を選べます。","・オンライン対戦：レートの近い相手と対戦。ステージは毎回ランダムです。","　勝つとレートが上がり、負けると下がります。","・キャラは8体。技はキャラごとに違います。"] },
  { t:"ストーリー（4/5）", l:["・ステージ1-1から5-4まで、全20ステージ。順に新しい敵に挑みます。","・敵を倒すと、次のステージが解放されます。","・敵の体力は、少しずつ増えていきます。（最後は1000）","・ワールドごとにマップ（足場）と色が変わります。","・敵ごとに動きと攻撃がまったく違います。","　（光の雨・衝撃波・瞬間移動・つらら・鬼火・炎の柱・レーザー…）","・進み具合は、この端末に保存されます。"] },
  { t:"ガチャと装備（5/5）", l:["・ストーリーのステージをクリアすると、「精霊のかけら」がもらえます。","　（初めてのクリア+150、2回目以降+50）","・かけら100で、ガチャを1回。1000で10連（SR以上が1つ確定）。","・ガチャで、武器・防具・アクセサリの装備が手に入ります。","・メニューの「装備」で、キャラごとに付けられます。","・効果：攻撃力・受けるダメージ・最大HP・移動・連射・マナ回復など。","・装備の効果は、練習とストーリーで有効です（対戦では使われません）。"] }
 ];
@@ -1105,7 +1106,10 @@ const LAYOUTS = {   // マップ（足場の並び）。左側だけ書けば、
     b: [[330,[20,150,280]], [250,[85,215]], [170,[20,150,280]]],              // 峰：足場が多く、段が広い
     c: [[330,[60,230]], [255,[145]], [180,[20,270]], [105,[145]]],            // そら：高く、細い道
     d: [[330,[20,150,280]], [260,[85,215]], [190,[150]], [120,[20,280]]],     // 火山：中央が高く、左右に逃げ場
-    e: [[335,[60,235]], [268,[145]], [200,[60,235]], [132,[145]]]             // 城：細い足場が交互に並ぶ
+    e: [[335,[60,235]], [268,[145]], [200,[60,235]], [132,[145]]],            // 城：細い足場が交互に並ぶ
+    f: [[335,[10,140,270]], [275,[75,205]], [215,[10,140,270]], [155,[75,205]]],   // 砂漠の遺跡：低く広い足場がぎっしり（対戦用）
+    g: [[340,[80,215]], [270,[0,285]], [200,[145]], [130,[0,285]]],                // 雲の上：中央と両端に分かれた足場（対戦用）
+    h: [[335,[20]], [275,[110]], [215,[200]], [155,[290]]]                         // 水晶の洞窟：中央へのぼる階段（対戦用）
 };
 function setLayout(k) {
     platforms.length = 1;   // [0]は床
@@ -1255,6 +1259,10 @@ const STAGES = [
    } }
 ];
 const TINTS = [null, 'rgba(120,200,255,0.10)', 'rgba(150,120,255,0.12)', 'rgba(255,140,70,0.12)', 'rgba(30,0,50,0.28)'];
+// オンライン対戦のステージ（マップ）。対戦ごとにランダム。ストーリーの5つ + 対戦用の3つ
+const MAPNAMES = { a:'ひかりの森', b:'凍てつく峰', c:'星のそら', d:'灼熱の火山', e:'はての城', f:'砂漠の遺跡', g:'雲の上', h:'水晶の洞窟' };
+const MAPTINT = { a:null, b:TINTS[1], c:TINTS[2], d:TINTS[3], e:TINTS[4], f:'rgba(255,190,90,0.12)', g:'rgba(200,230,255,0.10)', h:'rgba(120,255,220,0.10)' };
+let pvpMap = 'a';   // 今回の対戦のマップ（待機役が決めて、相手に伝える）
 STAGES.forEach((S, i) => {   // 体力・ダメージ・攻撃の間隔・マップを、ステージ番号に合わせて自動で決める
     const w = (i / 4) | 0;
     S.world = W[w]; S.map = 'abcde'[w]; S.tint = TINTS[w];
@@ -1378,9 +1386,10 @@ const FXL = { atk:'攻撃力', def:'受けるダメージ', rate:'連射', hp:'�
 const SLOTS = [['w', '武器'], ['a', '防具'], ['x', 'アクセサリ']];
 const ZERO = { atk:0, def:0, hp:0, spd:0, regen:0, rate:0, cost:0 };
 let bn = ZERO, rewardNote = '', gachaRes = [], eqChar = 0, eqSlot = 'w', eqPage = 0, costAcc = 0;   // bn = いま有効な装備ボーナス
-let gacha = { coins:1000, inv:[], eq:{}, seq:0, giftNew:true };   // 初回だけ、確認用に1000（10回分）を配布
+let gacha = { coins:1000, inv:[], eq:{}, seq:0, giftNew:true, gift2:true };   // 初回だけ、確認用に1000（10回分）を配布
 try { const d = JSON.parse(localStorage.getItem('spiritarena-gacha')); if (d && d.inv) gacha = d; } catch (e) {}
 const saveGacha = () => { try { localStorage.setItem('spiritarena-gacha', JSON.stringify(gacha)); } catch (e) {} };
+if (!gacha.gift2) { gacha.coins += 1000; gacha.gift2 = true; gacha.giftNew = true; saveGacha(); }   // 配布：精霊のかけら1000（10連1回分）を、1度だけ追加
 const maxHP = () => Math.round(ch.hp * (1 + bn.hp));
 const itemDef = it => EQ.find(d => d.b === it.b);
 const itemName = it => RAR[it.r].pre + itemDef(it).name;
@@ -1624,6 +1633,7 @@ function showVersus() {
 }
 function drawVersus() {
     ctx.textAlign = "center"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 30px sans-serif"; ctx.fillText("対戦相手が見つかりました！", 400, 60);
+    ctx.fillStyle = "#9fd"; ctx.font = "bold 16px sans-serif"; ctx.fillText(`ステージ：${MAPNAMES[pvpMap]}`, 400, 86);
     const panel = (x, label, name, r, c, color) => {
         ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, 100, 300, 250);
         ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.strokeRect(x, 100, 300, 250);
@@ -1688,7 +1698,7 @@ function draw() {
     if (gameState === "select") { drawSelect(); return; }
     if (gameState === "bossSelect") { drawBossSelect(); return; }
 
-    if (story && bossCfg.tint) { ctx.fillStyle = bossCfg.tint; ctx.fillRect(0, 0, 800, 450); }
+    { const tn = story ? bossCfg.tint : (pvp && online ? MAPTINT[pvpMap] : null); if (tn) { ctx.fillStyle = tn; ctx.fillRect(0, 0, 800, 450); } }
     ctx.strokeStyle = '#3d5a46'; ctx.lineWidth = 2; ctx.setLineDash([5,5]);
     ctx.beginPath(); ctx.moveTo(400,0); ctx.lineTo(400,450); ctx.stroke();
     ctx.setLineDash([]);
