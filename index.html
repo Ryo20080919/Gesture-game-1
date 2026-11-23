@@ -110,6 +110,16 @@ CHARS.push(
  {id:'mira',name:'ミラ',shape:'mirror',color:'#d6c8ff',hp:160,speed:2.8,
   desc:['HP 160','移動 普通','グー:光線','チョキ:無敵ダッシュ','パー:反射バリア']}
 );
+CHARS.push(   // ガチャで手に入る新キャラ（出る確率は SSR と同じ 2%）
+ {id:'tec',name:'テック',shape:'gear',color:'#8fb8c8',hp:140,speed:2.6,gacha:true,
+  desc:['HP 140','移動 やや遅い','グー:単発弾','チョキ:砲台を設置(最大3)','パー:全砲台が一斉射撃']},
+ {id:'gat',name:'ガトリ',shape:'penta',color:'#ffb347',hp:130,speed:2.4,gacha:true,
+  desc:['HP 130','移動 遅い','グー:連射（長押し）','チョキ:7方向の弾幕','パー:マナを一気に回復']},
+ {id:'poi',name:'ポイズ',shape:'cross',color:'#9be564',hp:125,speed:3.0,gacha:true,
+  desc:['HP 125','移動 速い','グー:毒の針','チョキ:毒針3連','パー:猛毒弾（長く効く）']},
+ {id:'ber',name:'バーサ',shape:'flame',color:'#ff5a4a',hp:175,speed:2.9,gacha:true,
+  desc:['HP 175','移動 普通','HPが減るほど攻撃力UP','グー:猛撃 チョキ:乱れ撃ち','パー:HPを払いマナ全回復']}
+);
 let ch = CHARS[0], clones = [];  // 分身リスト（ヨミの影分身 / ゴローの岩の壁）
 
 const BOSSES = [
@@ -159,7 +169,7 @@ window.addEventListener('keydown', e => {
     if (gameState === "mode" && (e.key === 'h' || e.key === 'H')) { helpPage = 0; gameState = "help"; }
     if ((gameState === "help" || gameState === "ranking" || gameState === "gacha" || gameState === "equip") && e.key === 'Escape') gameState = "mode";
     if (gameState === "mode" && /^[1234]$/.test(e.key)) pickMode(+e.key - 1);
-    else if (gameState === "select" && /^[1-9]$/.test(e.key)) chooseChar(+e.key - 1);
+    else if (gameState === "select" && /^[1-9]$/.test(e.key)) { const c = roster()[+e.key - 1]; if (c) chooseChar(CHARS.indexOf(c)); }
     else if (gameState === "bossSelect" && /^[1-4]$/.test(e.key)) startGame(+e.key - 1);
     if (gameState === "bossSelect" && e.key === 'Escape') resetGame();
     if (gameState === "storySelect" && e.key === 'Escape') gameState = "select";
@@ -242,9 +252,9 @@ function chooseChar(i) {
 function startGame(lv) {
     setLayout('a'); bn = equipBonus(ch.id); costAcc = 0;   // 装備ボーナスを有効に
     bossLv = lv; bossCfg = BOSSES[lv];
-    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0 });
+    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0 });
     Object.assign(boss, { x:650, y:340, vx:2.0, vy:0, w:bossCfg.size, h:bossCfg.size, hp:bossCfg.hp,
-                          maxHp:bossCfg.hp, jumpPower:bossCfg.jump, moveTimer:0, atk:0, dropPlat:null, standing:null });
+                          maxHp:bossCfg.hp, jumpPower:bossCfg.jump, moveTimer:0, atk:0, dropPlat:null, standing:null, poisonT:0, poisonD:0 });
     bullets = []; bossBullets = []; clones = [];
     ammo = 30; shotCooldown = 0; bossShootCooldown = 0; currentGesture = "No Hand";
     player.hp = maxHP();   // 最大HPの装備ボーナス
@@ -283,13 +293,13 @@ canvasElement.addEventListener('pointerdown', e => {
     if (gameState !== "select" && gameState !== "bossSelect") return;
     const r = canvasElement.getBoundingClientRect();
     const x = (e.clientX - r.left) * 800 / r.width, y = (e.clientY - r.top) * 450 / r.height;
-    const sel = gameState === "select", list = sel ? CHARS : BOSSES;
+    const sel = gameState === "select", list = sel ? roster() : BOSSES;
     list.forEach((c, i) => {
-        const cx = sel ? 15 + (i % 4) * 195 : 30 + i * 190, cy = sel ? 62 + ((i / 4) | 0) * 178 : 95;
-        const cw = sel ? 185 : 170, chh = sel ? 170 : 305;
-        if (x >= cx && x <= cx + cw && y >= cy && y <= cy + chh) sel ? chooseChar(i) : startGame(i);
+        const cx = sel ? 15 + (i % 4) * 195 : 30 + i * 190, cy = sel ? selGeom(list.length).y0 + ((i / 4) | 0) * selGeom(list.length).dy : 95;
+        const cw = sel ? 185 : 170, chh = sel ? selGeom(list.length).H : 305;
+        if (x >= cx && x <= cx + cw && y >= cy && y <= cy + chh) sel ? chooseChar(CHARS.indexOf(c)) : startGame(i);
     });
-    if (x < 150 && y > 410) { if (gameState === "bossSelect") resetGame(); else if (gameState === "select") { if (inRoom) leaveRoom(); else gameState = "mode"; } }
+    if (x < 150 && y > 428) { if (gameState === "bossSelect") resetGame(); else if (gameState === "select") { if (inRoom) leaveRoom(); else gameState = "mode"; } }
 });
 
 // --- MediaPipe Hands（軽量設定） ---
@@ -654,7 +664,7 @@ function startPvp() {
     settled = false; ratingNote = "";
     if (online) try { localStorage.setItem('spiritarena-inmatch', JSON.stringify({ opp:oppRating, mid:matchId, uid:oppUid })); } catch (e) {}
     showLobby(false);
-    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0 });
+    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0 });
     Object.assign(boss, { x:700, y:350, w:30, h:30, vx:0, vy:0 });
     bullets = []; bossBullets = []; clones = []; dead = new Set();
     opp = { x:100, y:350, hp:oppCh.hp, inv:0, rf:0, c:[], b:[] };
@@ -693,7 +703,7 @@ function sendState(force) {
 
 // 相手の弾 → 分身 / 反射バリア / 自分 の順に当たり判定
 function processOppBullets() {
-    for (const [id, bx0, by, power] of opp.b) {
+    for (const [id, bx0, by, power, btype] of opp.b) {
         if (dead.has(id)) continue;
         const bx = 800 - bx0;
         let used = false;
@@ -708,6 +718,7 @@ function processOppBullets() {
         }
         if (!used && player.invuln <= 0 && Math.abs(bx - player.x) < 20 && Math.abs(by - player.y) < 20) {
             player.hp = Math.max(0, player.hp - power); used = true;
+            const pz = POISON[btype]; if (pz) { player.poisonT = pz[0]; player.poisonD = pz[1]; }   // 毒を受ける
         }
         if (used) { dead.add(id); conn.send({ t:'k', id }); }
     }
@@ -718,7 +729,8 @@ function processOppBullets() {
 const COST = {
     mint:{Rock:1, Scissors:2, Paper:10}, don:{Rock:3, Scissors:4, Paper:8}, hayate:{Rock:1, Scissors:3, Paper:6},
     yomi:{Rock:1, Scissors:3, Paper:12}, luna:{Rock:3, Scissors:3, Paper:10}, goro:{Rock:2, Scissors:3, Paper:14},
-    rai:{Rock:1, Scissors:2, Paper:12}, mira:{Rock:2, Scissors:3, Paper:8}
+    rai:{Rock:1, Scissors:2, Paper:12}, mira:{Rock:2, Scissors:3, Paper:8},
+    tec:{Rock:1, Scissors:6, Paper:8}, gat:{Rock:1, Scissors:4}, poi:{Rock:1, Scissors:2, Paper:5}, ber:{Rock:2, Scissors:3}
 };
 
 // --- キャラ別の攻撃 ---
@@ -787,6 +799,31 @@ function attack() {
             player.x = Math.max(15, Math.min(385, x + (keys.left ? -90 : 90))); player.invuln = 25; ammo -= 3; shotCooldown = 50;
         } else if (g === "Paper" && ammo >= 8) { player.reflect = 80; ammo -= 8; shotCooldown = 100; }
         break;
+    case 'tec': // メカニック：砲台を最大3台そなえる（砲台は自動で撃ち、パーで一斉射撃）
+        if (g === "Rock" && ammo >= 1) { F({ vx:8, power:14, type:'seed' }); ammo -= 1; shotCooldown = 26; }
+        else if (g === "Scissors" && ammo >= 6 && clones.length < 3) {
+            clones.push({ x:Math.max(15, Math.min(385, x + 30 + clones.length * 28)), y, vy:0, guard:false, turret:true, hits:1, floorOnly:!player.isGround, t:clones.length * 25 });
+            ammo -= 6; shotCooldown = 40;
+        } else if (g === "Paper" && ammo >= 8 && clones.length) {
+            for (const c of clones) for (const d of [-0.15, 0, 0.15]) bullets.push({ x:c.x, y:c.y, vx:Math.cos(d) * 7, vy:Math.sin(d) * 7, power:14, type:'rock', life:140 });
+            ammo -= 8; shotCooldown = 70;
+        }
+        break;
+    case 'gat': // ガトリング：連射と弾幕。パーはマナを一気に回復
+        if (g === "Rock" && ammo >= 1) { F({ vx:11, vy:(Math.random() - 0.5) * 0.9, power:5, type:'seed' }); player.gc = (player.gc || 0) + 1; if (player.gc % 2 === 0) ammo -= 1; shotCooldown = 4; }
+        else if (g === "Scissors" && ammo >= 4) { for (let k = -3; k <= 3; k++) F({ vx:Math.cos(k * 0.12) * 9, vy:Math.sin(k * 0.12) * 9, power:6, type:'wind', life:100 }); ammo -= 4; shotCooldown = 36; }
+        else if (g === "Paper" && ammo < 24) { ammo = Math.min(30, ammo + 14); shotCooldown = 150; }
+        break;
+    case 'poi': // 毒使い：当てた相手に、じわじわ効く毒
+        if (g === "Rock" && ammo >= 1) { F({ vx:9, power:6, type:'dart' }); ammo -= 1; shotCooldown = 22; }
+        else if (g === "Scissors" && ammo >= 2) { for (const d of [-0.18, 0, 0.18]) F({ vx:Math.cos(d) * 8.5, vy:Math.sin(d) * 8.5, power:5, type:'dart' }); ammo -= 2; shotCooldown = 30; }
+        else if (g === "Paper" && ammo >= 5) { F({ vx:4.5, power:10, type:'venom' }); ammo -= 5; shotCooldown = 70; }
+        break;
+    case 'ber': // 狂戦士：HPが減るほど攻撃力アップ。パーはHPを払ってマナ全回復
+        if (g === "Rock" && ammo >= 2) { F({ vx:9, power:24, type:'axe' }); ammo -= 2; shotCooldown = 28; }
+        else if (g === "Scissors" && ammo >= 3) { for (const d of [-0.2, 0, 0.2]) F({ vx:Math.cos(d) * 8.5, vy:Math.sin(d) * 8.5, power:12, type:'axe' }); ammo -= 3; shotCooldown = 30; }
+        else if (g === "Paper" && player.hp > maxHP() * 0.2 && ammo < 28) { player.hp = Math.max(1, player.hp - Math.round(maxHP() * 0.12)); ammo = 30; player.haste = 150; shotCooldown = 200; }
+        break;
     case 'luna': // 月：追尾月光と流星群
         if (g === "Scissors" && ammo >= 3) {
             for (const d of [-1, 1]) {   // ボスの弾と同じ仕様：撃った瞬間の相手の位置に向け、そのあとは直進
@@ -799,6 +836,10 @@ function attack() {
             ammo -= 10; shotCooldown = 60;
         }
         break;
+    }
+    if (ch.id === 'ber' && bullets.length > n0) {   // 狂戦士：HPが減るほど、弾の威力アップ（最大 +90%）
+        const m = 1 + (1 - player.hp / maxHP()) * 0.9;
+        for (let i = n0; i < bullets.length; i++) bullets[i].power = Math.round(bullets[i].power * m);
     }
 }
 
@@ -925,6 +966,8 @@ function update() {
     }
 
     // プレイヤーの攻撃 & 弾薬回復
+    if (!pvp && boss.poisonT > 0 && boss.poisonT-- % 30 === 0) { boss.hp -= boss.poisonD; if (boss.hp <= 0) { boss.hp = 0; gameState = "clear"; if (story) storyCleared(); } }   // 毒でじわじわ減る
+    if (player.poisonT > 0 && player.poisonT-- % 30 === 0) { player.hp -= player.poisonD; if (player.hp <= 0) { player.hp = 0; gameState = "gameover"; if (pvp) sendState(true); } }
     if (shotCooldown > 0) shotCooldown = Math.max(0, shotCooldown - (1 + bn.rate));   // 連射の装備
     if (player.haste > 0) player.haste--;
     if (player.invuln > 0) player.invuln--;
@@ -957,6 +1000,7 @@ function update() {
                 b.hit = true;
                 if (!boss.shield) {
                     boss.hp -= Math.max(1, Math.round(b.power * (1 + bn.atk)));   // 攻撃力の装備
+                    const pz = POISON[b.type]; if (pz) { boss.poisonT = pz[0]; boss.poisonD = pz[1]; }   // 毒
                     if (boss.hp <= 0) { boss.hp = 0; gameState = "clear"; if (story) storyCleared(); }
                 }
             }
@@ -1038,7 +1082,7 @@ function hitClone(bb) {
     return false;
 }
 
-const BSTYLE = { seed:['#9be564',6], leaf:['#4ee68a',4], bomb:['#ff7a3d',9], frag:['#ffb347',4], boom:['#7fe8ff',8], wind:['#c8f4ff',3], shuri:['#d0d0e8',4], moon:['#ffe97a',8], meteor:['#ffd54a',7], boulder:['#b09070',11], pebble:['#d8c8a8',3], bolt:['#fff06a',5], zig:['#fff9a0',4], ray:['#e8dcff',5], blaze:['#ffb347',8] };
+const BSTYLE = { seed:['#9be564',6], leaf:['#4ee68a',4], bomb:['#ff7a3d',9], frag:['#ffb347',4], boom:['#7fe8ff',8], wind:['#c8f4ff',3], shuri:['#d0d0e8',4], moon:['#ffe97a',8], meteor:['#ffd54a',7], boulder:['#b09070',11], pebble:['#d8c8a8',3], bolt:['#fff06a',5], zig:['#fff9a0',4], ray:['#e8dcff',5], blaze:['#ffb347',8], dart:['#7aff7a',4], venom:['#b3ff4d',9], axe:['#ff5a4a',8] };
 
 // 対人戦：相手（左右反転）・相手の分身・相手の弾を描画
 function drawOpp() {
@@ -1063,9 +1107,9 @@ let helpPage = 0;
 const HELP = [
  { t:"あそびかた（1/5）", l:["手の形（グー・チョキ・パー）をカメラに見せて、","精霊と戦うシューティングバトルです。","","・手の形ごとに技が変わり、技はマナを消費します。","・手をカメラから外すと、マナが回復します。","・相手のHPを先に0にすれば勝ち、自分が0なら負け。"] },
  { t:"操作（2/5）", l:["・移動：スティック／十字キーを左右に倒す","・ジャンプ：45度以上、上に倒す","・降りる：足場の上で45度以上、下に倒す","　（倒し続けると、続けて下の足場まで降ります）","・画面のどこを押しても、その場にスティックが出ます","・キーボードは矢印キー／WASD、ゲームパッドも使えます","・練習・ストーリー中は右上の「ポーズ」（Escキー）で戻れます"] },
- { t:"モード（3/5）", l:["・練習：好きな精霊（Lv1〜4）と、ひとりで自由に戦います。","　レベルが上がるほど強くなります。","・友達と対戦：片方が「ルームを作る」で出た4桁コードを、","　もう片方が入力して接続します。","　終わったあとも部屋に残り、「もう一度対戦」か「ルームを出る」を選べます。","・オンライン対戦：レートの近い相手と対戦。ステージは毎回ランダムです。","　勝つとレートが上がり、負けると下がります。","・キャラは8体。技はキャラごとに違います。"] },
+ { t:"モード（3/5）", l:["・練習：好きな精霊（Lv1〜4）と、ひとりで自由に戦います。","　レベルが上がるほど強くなります。","・友達と対戦：片方が「ルームを作る」で出た4桁コードを、","　もう片方が入力して接続します。","　終わったあとも部屋に残り、「もう一度対戦」か「ルームを出る」を選べます。","・オンライン対戦：レートの近い相手と対戦。ステージは毎回ランダムです。","　勝つとレートが上がり、負けると下がります。","・キャラは8体＋ガチャで4体。技はキャラごとに違います。"] },
  { t:"ストーリー（4/5）", l:["・ステージ1-1から5-4まで、全20ステージ。順に新しい敵に挑みます。","・敵を倒すと、次のステージが解放されます。","・敵の体力は、少しずつ増えていきます。（最後は1000）","・ワールドごとにマップ（足場）と色が変わります。","・敵ごとに動きと攻撃がまったく違います。","　（光の雨・衝撃波・瞬間移動・つらら・鬼火・炎の柱・レーザー…）","・進み具合は、この端末に保存されます。"] },
- { t:"ガチャと装備（5/5）", l:["・ストーリーのステージをクリアすると、「精霊のかけら」がもらえます。","　（初めてのクリア+150、2回目以降+50）","・かけら100で、ガチャを1回。1000で10連（SR以上が1つ確定）。","・ガチャで、武器・防具・アクセサリの装備が手に入ります。","・メニューの「装備」で、キャラごとに付けられます。","・効果：攻撃力・受けるダメージ・最大HP・移動・連射・マナ回復など。","・装備の効果は、練習とストーリーで有効です（対戦では使われません）。"] }
+ { t:"ガチャと装備（5/5）", l:["・ストーリーのステージをクリアすると、「精霊のかけら」がもらえます。","　（初めてのクリア+150、2回目以降+50）","・かけら100で、ガチャを1回。1000で10連（SR以上が1つ確定）。","・ガチャで、装備と、ごくまれに（2%）新キャラが手に入ります。","・メニューの「装備」で、キャラごとに付けられます。","・効果：攻撃力・受けるダメージ・最大HP・移動・連射・マナ回復など。","・装備の効果は、練習とストーリーで有効です（対戦では使われません）。"] }
 ];
 function drawHelp() {
     const p = HELP[helpPage];
@@ -1400,21 +1444,45 @@ function equipBonus(cid) {
     for (const [s] of SLOTS) { const it = gacha.inv.find(v => v.u === e[s]); if (it) { const f = itemFx(it); for (const k in f) b[k] += f[k]; } }
     return b;
 }
-function rollItem(minR) {   // 排出率：N 60% / R 28% / SR 10% / SSR 2%
-    let r; do { const x = Math.random(); r = x < 0.02 ? 3 : x < 0.12 ? 2 : x < 0.40 ? 1 : 0; } while (r < (minR || 0));
-    return { u: ++gacha.seq, b: EQ[(Math.random() * EQ.length) | 0].b, r };
+const GACHA_FREE = true;   // 【確認用】true の間は、かけらを使わずにガチャを回せる。次のバージョンで false に戻す
+const POISON = { dart:[240, 4], venom:[480, 7] };   // 毒：[続く長さ(フレーム), 30フレームごとのダメージ]
+gacha.chars = gacha.chars || [];   // ガチャで仲間になったキャラ
+const roster = () => CHARS.filter(c => !c.gacha || gacha.chars.includes(c.id));   // 使えるキャラ（ガチャキャラは、手に入れたら追加）
+const selGeom = n => n > 8 ? { y0:56, dy:124, H:120 } : { y0:62, dy:178, H:170 };   // キャラ選択のカード配置（12体まで3段）
+const rankOf = r => r.char ? 4 : r.r;   // 0=N 1=R 2=SR 3=SSR 4=新キャラ
+const RANK_K = ['N', 'R', 'SR', 'SSR', 'NEW!'];
+const rankColor = (k, T) => k < 4 ? RAR[k].color : `hsl(${(T * 7) % 360},90%,65%)`;   // 新キャラは虹色
+function rollRes(minRank) {   // 排出率：N 58% / R 28% / SR 10% / SSR 2% / 新キャラ 2%
+    let rank; do { const x = Math.random(); rank = x < 0.02 ? 4 : x < 0.04 ? 3 : x < 0.14 ? 2 : x < 0.42 ? 1 : 0; } while (rank < (minRank || 0));
+    if (rank === 4) {
+        const c = CHARS.filter(v => v.gacha)[(Math.random() * CHARS.filter(v => v.gacha).length) | 0], dup = gacha.chars.includes(c.id);
+        if (dup) gacha.coins += 100; else gacha.chars.push(c.id);   // すでに持っているキャラは、かけら100に変わる
+        return { char:c.id, dup };
+    }
+    return { u: ++gacha.seq, b: EQ[(Math.random() * EQ.length) | 0].b, r: rank };
 }
 function doPull(n) {   // 1回=100 / 10連=1000（10連はSR以上が1つ確定）
-    if (gacha.coins < n * 100) return false;
-    gacha.coins -= n * 100; gachaRes = [];
-    for (let i = 0; i < n; i++) gachaRes.push(rollItem(n === 10 && i === 9 ? 2 : 0));
-    gacha.inv.push(...gachaRes); saveGacha(); return true;
+    const cost = GACHA_FREE ? 0 : n * 100;
+    if (gacha.coins < cost) return false;
+    gacha.coins -= cost; gachaRes = [];
+    for (let i = 0; i < n; i++) gachaRes.push(rollRes(n === 10 && i === 9 ? 2 : 0));
+    gacha.inv.push(...gachaRes.filter(r => !r.char)); saveGacha(); return true;
+}
+function resCard(res, x, y, w, h) {
+    if (!res.char) { itemCard(res, x, y, w, h); return; }
+    const c = CHARS.find(v => v.id === res.char), col = rankColor(4, performance.now() / 12);
+    ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, y, w, h); ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.strokeRect(x, y, w, h);
+    drawShape(c.shape, x + 26, y + h / 2 - 4, Math.min(20, h / 3), c.color, 1);
+    ctx.textAlign = "left"; ctx.fillStyle = col; ctx.font = "bold 12px sans-serif"; ctx.fillText("NEW CHARACTER", x + 54, y + 18);
+    ctx.fillStyle = "white"; ctx.font = "bold 15px sans-serif"; ctx.fillText(c.name, x + 54, y + 38);
+    ctx.fillStyle = "#cde"; ctx.font = "11px sans-serif"; ctx.fillText(res.dup ? "もう仲間です → かけら+100" : "仲間になった！", x + 54, y + 56);
+    if (h > 70) ctx.fillText(c.desc[2], x + 8, y + h - 8);
 }
 function ownerOf(u) { for (const cid in gacha.eq) for (const s in gacha.eq[cid]) if (gacha.eq[cid][s] === u) return cid; return null; }
 const slotItems = () => gacha.inv.filter(it => itemDef(it).slot === eqSlot).sort((a, b) => b.r - a.r || a.u - b.u);
 function equipItem(it) {   // 他のキャラが装備中なら、そのキャラから外してこのキャラへ
     const o = ownerOf(it.u); if (o) { for (const s in gacha.eq[o]) if (gacha.eq[o][s] === it.u) delete gacha.eq[o][s]; }
-    const cid = CHARS[eqChar].id; (gacha.eq[cid] = gacha.eq[cid] || {})[eqSlot] = it.u; saveGacha();
+    const cid = (roster()[eqChar] || CHARS[0]).id; (gacha.eq[cid] = gacha.eq[cid] || {})[eqSlot] = it.u; saveGacha();
 }
 const canvasPos = e => { const r = canvasElement.getBoundingClientRect(); return [(e.clientX - r.left) * 800 / r.width, (e.clientY - r.top) * 450 / r.height]; };
 const inBox = (x, y, bx, by, w, h) => x >= bx && x <= bx + w && y >= by && y <= by + h;
@@ -1427,43 +1495,52 @@ function itemCard(it, x, y, w, h, tag) {
     if (tag) { ctx.fillStyle = "#ffb347"; ctx.fillText(tag, x + 6, y + h - 6); }
 }
 let gAnim = null, gParts = [];   // ガチャ演出の状態と、光の粒
-const GTR = [28, 36, 48, 64];   // 登場までの「ため」の長さ（レアリティが高いほど長い）
+const GTR = [28, 36, 48, 64, 80];   // 登場までの「ため」の長さ（レアリティが高いほど長い）
 function startGachaAnim(items) { gAnim = { items, i:0, t:0, done:false, flash:0 }; gParts = []; }
 function gBurst(x, y, n, color, sp, grav) { for (let k = 0; k < n; k++) { const a = Math.random() * Math.PI * 2, v = (0.3 + Math.random()) * sp; gParts.push({ x, y, vx:Math.cos(a) * v, vy:Math.sin(a) * v, g:grav || 0, life:40 + Math.random() * 40, max:80, color, size:2 + Math.random() * 3 }); } }
-function drawGachaAnim() {   // 1つずつ登場する演出（魔法陣 → ため → 閃光 → カード登場）
-    const A = gAnim, it = A.items[A.i], r = it.r, c = RAR[r].color, tr = GTR[r], T = ++A.t;
+function drawGachaAnim() {   // 1つずつ登場する演出。N → R → SR … とだんだんレア度が上がっていく
+    const A = gAnim, res = A.items[A.i], r = rankOf(res), tr = GTR[r], T = ++A.t, tiers = r + 1, per = tr / tiers;
+    const tier = Math.min(r, Math.floor(T / per)), c = rankColor(r, T), col = T < tr ? rankColor(tier, T) : c;
+    if (T < tr && A.tier !== tier) { A.tier = tier; gBurst(400, 215, 14 + tier * 12, col, 6, 0); A.pulse = 10; }   // 段階が上がるたびに、光がはじける
     ctx.save();
     ctx.fillStyle = "#05060f"; ctx.fillRect(0, 0, 800, 450);
-    if (r === 3 && T >= tr && T < tr + 14) ctx.translate((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12);   // SSR：画面がゆれる
-    const pw = Math.min(1, T / tr);
-    ctx.globalAlpha = 0.12 + 0.28 * pw; ctx.fillStyle = c;   // 放射状の光
-    for (let k = 0; k < 18; k++) { const a = T * (0.006 + r * 0.004) + k * Math.PI / 9; ctx.beginPath(); ctx.moveTo(400, 215); ctx.arc(400, 215, 560, a, a + 0.1); ctx.closePath(); ctx.fill(); }
-    ctx.globalAlpha = 0.35 + 0.6 * pw; ctx.strokeStyle = c; ctx.lineWidth = 3;   // 魔法陣
-    for (const rad of [70, 105]) { ctx.beginPath(); ctx.arc(400, 215, rad + pw * 10, 0, Math.PI * 2); ctx.stroke(); }
+    if (r >= 3 && T >= tr && T < tr + 14) ctx.translate((Math.random() - 0.5) * 12, (Math.random() - 0.5) * 12);   // SSR・新キャラ：画面がゆれる
+    const pw = Math.min(1, T / tr), pu = A.pulse > 0 ? A.pulse-- / 10 : 0;
+    ctx.globalAlpha = 0.12 + 0.28 * pw + 0.2 * pu; ctx.fillStyle = col;   // 放射状の光（いまの段階の色）
+    for (let k = 0; k < 18; k++) { const a = T * (0.006 + tier * 0.004) + k * Math.PI / 9; ctx.beginPath(); ctx.moveTo(400, 215); ctx.arc(400, 215, 560, a, a + 0.1); ctx.closePath(); ctx.fill(); }
+    ctx.globalAlpha = 0.35 + 0.6 * pw; ctx.strokeStyle = col; ctx.lineWidth = 3;   // 魔法陣
+    for (const rad of [70, 105]) { ctx.beginPath(); ctx.arc(400, 215, rad + pw * 10 + pu * 12, 0, Math.PI * 2); ctx.stroke(); }
     ctx.lineWidth = 2;
     for (let k = 0; k < 6; k++) { const a = T * 0.02 + k * Math.PI / 3, b = a + Math.PI * 2 / 3; ctx.beginPath(); ctx.moveTo(400 + Math.cos(a) * 105, 215 + Math.sin(a) * 105); ctx.lineTo(400 + Math.cos(b) * 105, 215 + Math.sin(b) * 105); ctx.stroke(); }
     ctx.globalAlpha = 1;
-    if (T < tr) {   // ため：光の玉がふくらみ、光の粒が集まってくる
-        for (let g = 4; g >= 0; g--) { ctx.globalAlpha = 0.18; ctx.fillStyle = g ? c : "#fff"; ctx.beginPath(); ctx.arc(400, 215, (6 + T * 0.9) * (1 + g * 0.4), 0, Math.PI * 2); ctx.fill(); }
-        ctx.globalAlpha = 1;
-        if (T % 2 === 0) { const a = Math.random() * Math.PI * 2; gParts.push({ x:400 + Math.cos(a) * 260, y:215 + Math.sin(a) * 260, vx:-Math.cos(a) * 6, vy:-Math.sin(a) * 6, life:40, max:40, color:c, size:3 }); }
+    // 上のランプ：N → R → SR … と点灯していく
+    for (let k = 0; k <= r; k++) {
+        const x = 400 + (k - r / 2) * 74 - 30, on = T >= tr || k <= tier;
+        ctx.globalAlpha = on ? 1 : 0.25; ctx.fillStyle = "#10131f"; ctx.fillRect(x, 30, 60, 28); ctx.strokeStyle = rankColor(k, T); ctx.lineWidth = on ? 3 : 1.5; ctx.strokeRect(x, 30, 60, 28);
+        ctx.fillStyle = rankColor(k, T); ctx.font = "bold 16px sans-serif"; ctx.textAlign = "center"; ctx.fillText(RANK_K[k], x + 30, 50);
     }
-    if (T === tr) { gBurst(400, 215, [24, 50, 100, 220][r], c, 9, 0.05); if (r >= 2) gBurst(400, 215, 40, "#fff", 12, 0); A.flash = r === 3 ? 16 : 8; }
-    if (A.flash > 0) { ctx.globalAlpha = A.flash / (r === 3 ? 16 : 22); ctx.fillStyle = r === 3 ? "#fff3b0" : "#fff"; ctx.fillRect(0, 0, 800, 450); ctx.globalAlpha = 1; A.flash--; }   // 閃光
-    if (r >= 2 && T >= tr && T < tr + 10) {   // SR・SSR：いなずま
-        ctx.strokeStyle = r === 3 ? "#fff3b0" : "#e6c6ff"; ctx.lineWidth = 2;
+    ctx.globalAlpha = 1;
+    if (T < tr) {   // ため：光の玉がふくらみ、光の粒が集まってくる
+        for (let g = 4; g >= 0; g--) { ctx.globalAlpha = 0.18; ctx.fillStyle = g ? col : "#fff"; ctx.beginPath(); ctx.arc(400, 215, (6 + T * 0.9) * (1 + g * 0.4), 0, Math.PI * 2); ctx.fill(); }
+        ctx.globalAlpha = 1;
+        if (T % 2 === 0) { const a = Math.random() * Math.PI * 2; gParts.push({ x:400 + Math.cos(a) * 260, y:215 + Math.sin(a) * 260, vx:-Math.cos(a) * 6, vy:-Math.sin(a) * 6, life:40, max:40, color:col, size:3 }); }
+    }
+    if (T === tr) { gBurst(400, 215, [24, 50, 100, 220, 300][r], c, 9, 0.05); if (r >= 2) gBurst(400, 215, 40, "#fff", 12, 0); A.flash = r >= 3 ? 16 : 8; }
+    if (A.flash > 0) { ctx.globalAlpha = A.flash / (r >= 3 ? 16 : 22); ctx.fillStyle = r === 3 ? "#fff3b0" : "#fff"; ctx.fillRect(0, 0, 800, 450); ctx.globalAlpha = 1; A.flash--; }   // 閃光
+    if (r >= 2 && T >= tr && T < tr + 10) {   // SR以上：いなずま
+        ctx.strokeStyle = r >= 3 ? "#fff3b0" : "#e6c6ff"; ctx.lineWidth = 2;
         for (let k = 0; k < 4; k++) { let x = 400, y = 215; const a = Math.random() * Math.PI * 2; ctx.beginPath(); ctx.moveTo(x, y); for (let s = 0; s < 7; s++) { x += Math.cos(a) * 55 + (Math.random() - 0.5) * 40; y += Math.sin(a) * 55 + (Math.random() - 0.5) * 40; ctx.lineTo(x, y); } ctx.stroke(); }
     }
     if (T >= tr) {   // 登場：カードが飛び出し、レアリティと星が光る
         const k = Math.min(1, (T - tr) / 18), e = 1 + 2.70158 * Math.pow(k - 1, 3) + 1.70158 * Math.pow(k - 1, 2);
-        ctx.save(); ctx.translate(400, 250); ctx.scale(e * 1.25, e * 1.25);
-        ctx.shadowColor = c; ctx.shadowBlur = 25 + r * 10; itemCard(it, -120, -45, 240, 90); ctx.restore();
-        ctx.textAlign = "center"; ctx.shadowColor = c; ctx.shadowBlur = 20; ctx.fillStyle = c; ctx.font = `bold ${44 + r * 8}px sans-serif`;
-        ctx.globalAlpha = Math.min(1, (T - tr) / 10); ctx.fillText(RAR[r].k, 400, 100); ctx.globalAlpha = 1;
-        ctx.font = "bold 30px sans-serif"; ctx.fillStyle = "#ffe97a"; ctx.fillText("★".repeat(Math.min([1, 2, 3, 5][r], Math.floor((T - tr) / 5))), 400, 142);
+        ctx.save(); ctx.translate(400, 255); ctx.scale(e * 1.25, e * 1.25);
+        ctx.shadowColor = c; ctx.shadowBlur = 25 + r * 8; resCard(res, -120, -45, 240, 90); ctx.restore();
+        ctx.textAlign = "center"; ctx.shadowColor = c; ctx.shadowBlur = 20; ctx.fillStyle = c; ctx.font = `bold ${44 + Math.min(r, 3) * 8}px sans-serif`;
+        ctx.globalAlpha = Math.min(1, (T - tr) / 10); ctx.fillText(RANK_K[r], 400, 118); ctx.globalAlpha = 1;
+        ctx.font = "bold 28px sans-serif"; ctx.fillStyle = "#ffe97a"; ctx.fillText("★".repeat(Math.min([1, 2, 3, 5, 5][r], Math.floor((T - tr) / 5))), 400, 158);
         ctx.shadowBlur = 0;
-        if (r === 3 && T % 22 === 0) gBurst(100 + Math.random() * 600, 60 + Math.random() * 180, 60, ["#ffd24d", "#fff", "#ff9a4d"][(Math.random() * 3) | 0], 5, 0.08);   // SSR：花火
-        if (r === 3 && T % 3 === 0) gParts.push({ x:Math.random() * 800, y:-5, vx:0, vy:2 + Math.random() * 2, life:140, max:140, color:"#ffd24d", size:3 });   // SSR：金色の雨
+        if (r >= 3 && T % 22 === 0) gBurst(100 + Math.random() * 600, 60 + Math.random() * 180, 60, ["#ffd24d", "#fff", "#ff9a4d", "#ff7ae0", "#7fe8ff"][(Math.random() * 5) | 0], 5, 0.08);   // 花火
+        if (r >= 3 && T % 3 === 0) gParts.push({ x:Math.random() * 800, y:-5, vx:0, vy:2 + Math.random() * 2, life:140, max:140, color:r === 4 ? rankColor(4, T + Math.random() * 60) : "#ffd24d", size:3 });   // 金色（虹色）の雨
     }
     gParts = gParts.filter(p => p.life > 0);
     for (const p of gParts) { p.x += p.vx; p.y += p.vy; p.vy += p.g || 0; p.life--; ctx.globalAlpha = Math.max(0, p.life / p.max); ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.size, p.size); }
@@ -1479,41 +1556,50 @@ function drawGacha() {
     ctx.globalAlpha = 1;
     ctx.textAlign = "center"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 28px sans-serif"; ctx.shadowColor = "#ffe97a"; ctx.shadowBlur = 14; ctx.fillText("ガチャ", 400, 34); ctx.shadowBlur = 0;
     ctx.textAlign = "right"; ctx.font = "bold 16px sans-serif"; ctx.fillText(`精霊のかけら ${gacha.coins}`, 790, 26);
-    ctx.textAlign = "center"; ctx.fillStyle = "#cde"; ctx.font = "12px sans-serif"; ctx.fillText("N 60% ／ R 28% ／ SR 10% ／ SSR 2%　（10連は SR以上が1つ確定）", 400, 56);
+    ctx.textAlign = "center"; ctx.fillStyle = "#cde"; ctx.font = "12px sans-serif"; ctx.fillText("N 58% ／ R 28% ／ SR 10% ／ SSR 2% ／ 新キャラ 2%　（10連は SR以上が1つ確定）", 400, 56);
+    if (GACHA_FREE) { ctx.fillStyle = "#ff9a9a"; ctx.font = "bold 12px sans-serif"; ctx.fillText("【テスト中】いまは、かけらを使わずに何度でも回せます", 400, 70); }
     [[150, 1, '1回まわす', 100], [430, 10, '10連（SR以上1つ確定）', 1000]].forEach(([x, n, label, cost]) => {
-        const ok = gacha.coins >= cost;
-        ctx.fillStyle = ok ? "#2c4a34" : "#2a2a2a"; ctx.fillRect(x, 70, 220, 56);
-        ctx.strokeStyle = ok ? "#ffe97a" : "#666"; ctx.lineWidth = 2; ctx.strokeRect(x, 70, 220, 56);
-        ctx.fillStyle = ok ? "white" : "#888"; ctx.font = "bold 17px sans-serif"; ctx.fillText(label, x + 110, 96); ctx.font = "13px sans-serif"; ctx.fillText(`かけら ${cost}`, x + 110, 116);
+        const ok = GACHA_FREE || gacha.coins >= cost;
+        ctx.fillStyle = ok ? "#2c4a34" : "#2a2a2a"; ctx.fillRect(x, 76, 220, 52);
+        ctx.strokeStyle = ok ? "#ffe97a" : "#666"; ctx.lineWidth = 2; ctx.strokeRect(x, 76, 220, 52);
+        ctx.fillStyle = ok ? "white" : "#888"; ctx.font = "bold 17px sans-serif"; ctx.fillText(label, x + 110, 98); ctx.font = "13px sans-serif"; ctx.fillText(GACHA_FREE ? 'かけら 0（テスト中）' : `かけら ${cost}`, x + 110, 118);
     });
     ctx.textAlign = "center";
-    if (!gachaRes.length) { ctx.fillStyle = "#9ab"; ctx.font = "14px sans-serif"; ctx.fillText("ガチャをまわすと、装備が手に入ります。", 400, 240); ctx.fillText("ストーリーのステージをクリアすると、かけらがもらえます。", 400, 266); }
-    else if (gachaRes.length === 1) itemCard(gachaRes[0], 280, 170, 240, 80);
-    else { ctx.fillStyle = "#ffe97a"; ctx.font = "bold 14px sans-serif"; ctx.fillText("▼ 今回の結果", 400, 144); gachaRes.forEach((it, i) => itemCard(it, 25 + (i % 5) * 152, 154 + ((i / 5) | 0) * 100, 146, 90)); }
-    ctx.textAlign = "center"; ctx.fillStyle = "#9ab"; ctx.font = "12px sans-serif"; ctx.fillText("装備は、メニューの「装備」からキャラに付けられます。効果は練習・ストーリーで有効（対戦では使われません）", 400, 400);
+    if (!gachaRes.length) { ctx.fillStyle = "#9ab"; ctx.font = "14px sans-serif"; ctx.fillText("ガチャをまわすと、装備や新しいキャラが手に入ります。", 400, 240); ctx.fillText("ストーリーのステージをクリアすると、かけらがもらえます。", 400, 266); }
+    else if (gachaRes.length === 1) resCard(gachaRes[0], 280, 170, 240, 80);
+    else { ctx.fillStyle = "#ffe97a"; ctx.font = "bold 14px sans-serif"; ctx.fillText("▼ 今回の結果", 400, 144); gachaRes.forEach((it, i) => resCard(it, 25 + (i % 5) * 152, 154 + ((i / 5) | 0) * 100, 146, 90)); }
+    ctx.textAlign = "center"; ctx.fillStyle = "#9ab"; ctx.font = "12px sans-serif"; ctx.fillText(`装備は、メニューの「装備」からキャラに付けられます。効果は練習・ストーリーで有効（対戦では使われません）　所持キャラ ${roster().length}体`, 400, 400);
+    if (GACHA_FREE) { ctx.strokeStyle = "#a66"; ctx.lineWidth = 1.5; ctx.strokeRect(560, 418, 230, 24); ctx.fillStyle = "#e99"; ctx.font = "12px sans-serif"; ctx.fillText(resetArm && Date.now() - resetArm < 3000 ? "もう一度押すと、所持品を全部消す" : "【テスト】所持品・新キャラをリセット", 675, 435); }
     ctx.textAlign = "left"; ctx.fillStyle = "#aaa"; ctx.font = "16px sans-serif"; ctx.fillText("← 戻る", 20, 440); ctx.textAlign = "center";
 }
+let resetArm = 0;
 function gachaTap(e) {
     const [x, y] = canvasPos(e);
     if (gAnim && !gAnim.done) {   // 演出中：タップで早送り → 次の1つへ（スキップで結果一覧へ）
-        const tr = GTR[gAnim.items[gAnim.i].r];
+        const tr = GTR[rankOf(gAnim.items[gAnim.i])];
         if (gAnim.items.length > 1 && inBox(x, y, 650, 405, 140, 36)) { gAnim.done = true; return; }
         if (gAnim.t < tr) { gAnim.t = tr - 1; return; }
         if (gAnim.t < tr + 20) return;
-        if (++gAnim.i >= gAnim.items.length) gAnim.done = true; else { gAnim.t = 0; gAnim.flash = 0; gParts = []; }
+        if (++gAnim.i >= gAnim.items.length) gAnim.done = true; else { gAnim.t = 0; gAnim.flash = 0; gAnim.tier = -1; gParts = []; }
         return;
     }
     if (x < 150 && y > 420) { gameState = "mode"; return; }
-    if (inBox(x, y, 150, 70, 220, 56)) { if (doPull(1)) startGachaAnim(gachaRes); }
-    else if (inBox(x, y, 430, 70, 220, 56)) { if (doPull(10)) startGachaAnim(gachaRes); }
+    if (GACHA_FREE && inBox(x, y, 560, 418, 230, 24)) {   // テスト用：所持品のリセット（2回押し）
+        if (resetArm && Date.now() - resetArm < 3000) { gacha.inv = []; gacha.eq = {}; gacha.chars = []; gachaRes = []; gAnim = null; saveGacha(); resetArm = 0; } else resetArm = Date.now();
+        return;
+    }
+    if (inBox(x, y, 150, 76, 220, 52)) { if (doPull(1)) startGachaAnim(gachaRes); }
+    else if (inBox(x, y, 430, 76, 220, 52)) { if (doPull(10)) startGachaAnim(gachaRes); }
 }
+const tabBox = (i, n) => n <= 8 ? [8 + i * 98, 34, 94, 50] : [8 + (i % 6) * 131, 30 + ((i / 6) | 0) * 30, 127, 26];
 function drawEquip() {
-    const c = CHARS[eqChar], bon = equipBonus(c.id), e = gacha.eq[c.id] || {};
+    const c = (roster()[eqChar] || CHARS[0]), bon = equipBonus(c.id), e = gacha.eq[c.id] || {};
     ctx.textAlign = "center"; ctx.fillStyle = "#ffe97a"; ctx.font = "bold 20px sans-serif"; ctx.fillText("装備", 400, 24);
-    CHARS.forEach((cc, i) => {
-        const x = 8 + i * 98;
-        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, 34, 94, 50); ctx.strokeStyle = i === eqChar ? "#ffe97a" : cc.color; ctx.lineWidth = i === eqChar ? 3 : 1.5; ctx.strokeRect(x, 34, 94, 50);
-        drawShape(cc.shape, x + 22, 59, 11, cc.color, 1); ctx.textAlign = "left"; ctx.fillStyle = "white"; ctx.font = "bold 12px sans-serif"; ctx.fillText(cc.name, x + 38, 63);
+    const ros = roster();
+    ros.forEach((cc, i) => {
+        const [x, y0, w, h] = tabBox(i, ros.length);
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, y0, w, h); ctx.strokeStyle = i === eqChar ? "#ffe97a" : cc.color; ctx.lineWidth = i === eqChar ? 3 : 1.5; ctx.strokeRect(x, y0, w, h);
+        drawShape(cc.shape, x + 18, y0 + h / 2, h > 40 ? 11 : 8, cc.color, 1); ctx.textAlign = "left"; ctx.fillStyle = "white"; ctx.font = "bold 12px sans-serif"; ctx.fillText(cc.name, x + 36, y0 + h / 2 + 4);
     });
     SLOTS.forEach(([s, label], i) => {
         const x = 10 + i * 262, it = gacha.inv.find(v => v.u === e[s]);
@@ -1536,9 +1622,9 @@ function drawEquip() {
     ctx.fillStyle = "#ccc"; ctx.font = "13px sans-serif"; ctx.textAlign = "center"; ctx.fillText(`${eqPage + 1} / ${pages}`, 400, 429);
 }
 function equipTap(e) {
-    const [x, y] = canvasPos(e), c = CHARS[eqChar];
+    const [x, y] = canvasPos(e), c = (roster()[eqChar] || CHARS[0]);
     if (inBox(x, y, 10, 408, 110, 32)) { gameState = "mode"; return; }
-    CHARS.forEach((cc, i) => { if (inBox(x, y, 8 + i * 98, 34, 94, 50)) { eqChar = i; eqPage = 0; } });
+    roster().forEach((cc, i) => { const [bx, by, bw, bh] = tabBox(i, roster().length); if (inBox(x, y, bx, by, bw, bh)) { eqChar = i; eqPage = 0; } });
     SLOTS.forEach(([s], i) => { if (inBox(x, y, 10 + i * 262, 92, 250, 68)) { eqSlot = s; eqPage = 0; } });
     const items = slotItems(), pages = Math.max(1, Math.ceil(items.length / 12));
     if (inBox(x, y, 290, 408, 70, 32) && eqPage > 0) eqPage--;
@@ -1583,10 +1669,10 @@ function drawShape(s, x, y, r, color, a) {
         ctx.arc(x, y, r * 1.1, -Math.PI / 2, Math.PI / 2, true);
         ctx.quadraticCurveTo(x - r * 0.9, y, x, y - r * 1.1);
     } else {
-        const T = { drop:[20,0], tri:[3,0], dia:[4,0], shuri:[8,1], rock:[6,0], bolt:[10,1], mirror:[8,0] }[s] || [4,0];
+        const T = { drop:[20,0], tri:[3,0], dia:[4,0], shuri:[8,1], rock:[6,0], bolt:[10,1], mirror:[8,0], gear:[12,1,0.8], penta:[5,0], cross:[8,1,0.5], flame:[14,1,0.45] }[s] || [4,0];
         const n = T[0], R = r * (s === 'tri' ? 1.15 : s === 'shuri' ? 1.25 : 1.1), dy = s === 'tri' ? r * 0.45 : 0;
         for (let i = 0; i < n; i++) {
-            const rr = (T[1] && i % 2) ? R * 0.4 : R, ang = -Math.PI / 2 + i * 2 * Math.PI / n;
+            const rr = (T[1] && i % 2) ? R * (T[2] || 0.4) : R, ang = -Math.PI / 2 + i * 2 * Math.PI / n;
             const px = x + Math.cos(ang) * rr, py = y + dy + Math.sin(ang) * rr;
             i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
         }
@@ -1596,25 +1682,22 @@ function drawShape(s, x, y, r, color, a) {
 }
 
 function drawSelect() {
-    ctx.textAlign = "center";
-    ctx.fillStyle = "#4eef90"; ctx.font = "bold 26px sans-serif";
-    ctx.fillText("SPIRIT ARENA 精霊の闘技場", 400, 28);
+    const list = roster(), g = selGeom(list.length), compact = g.H < 170;
+    ctx.textAlign = "center"; ctx.fillStyle = "#4eef90"; ctx.font = "bold 26px sans-serif"; ctx.fillText("SPIRIT ARENA 精霊の闘技場", 400, 28);
     ctx.fillStyle = "white"; ctx.font = "14px sans-serif";
-    ctx.fillText(inRoom ? "もう一度対戦：キャラをえらんでください（相手とは接続中）" : "キャラをタップ（キー 1〜8）してスタート", 400, 50);
-    CHARS.forEach((c, i) => {
-        const x = 15 + (i % 4) * 195, y = 62 + ((i / 4) | 0) * 178;
-        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, y, 185, 170);
-        ctx.strokeStyle = c.color; ctx.lineWidth = 2; ctx.strokeRect(x, y, 185, 170);
-        drawShape(c.shape, x + 38, y + 42, 22, c.color, 1);
-        ctx.textAlign = "left"; ctx.fillStyle = "white"; ctx.font = "bold 18px sans-serif";
-        ctx.fillText(`${i + 1}. ${c.name}`, x + 72, y + 48);
-        ctx.font = "12px sans-serif"; ctx.fillStyle = "#ccc";
-        c.desc.forEach((t, k) => ctx.fillText(t, x + 12, y + 88 + k * 16));
+    ctx.fillText(inRoom ? "もう一度対戦：キャラをえらんでください（相手とは接続中）" : `キャラをタップ（キー 1〜${Math.min(9, list.length)}）してスタート`, 400, 50);
+    list.forEach((c, i) => {
+        const x = 15 + (i % 4) * 195, y = g.y0 + ((i / 4) | 0) * g.dy;
+        ctx.fillStyle = "#1b2d24"; ctx.fillRect(x, y, 185, g.H); ctx.strokeStyle = c.color; ctx.lineWidth = 2; ctx.strokeRect(x, y, 185, g.H);
+        drawShape(c.shape, x + (compact ? 24 : 38), y + (compact ? 24 : 42), compact ? 15 : 22, c.color, 1);
+        ctx.textAlign = "left"; ctx.fillStyle = "white"; ctx.font = compact ? "bold 15px sans-serif" : "bold 18px sans-serif";
+        ctx.fillText(`${i + 1}. ${c.name}`, x + (compact ? 48 : 72), y + (compact ? 30 : 48));
+        ctx.font = compact ? "11px sans-serif" : "12px sans-serif"; ctx.fillStyle = "#ccc";
+        c.desc.forEach((t, k) => ctx.fillText(t, x + 10, y + (compact ? 52 + k * 13 : 88 + k * 16)));
+        if (c.gacha) { ctx.fillStyle = "#ffe97a"; ctx.font = "bold 10px sans-serif"; ctx.fillText("ガチャ限定", x + 125, y + 14); }
         ctx.textAlign = "center";
     });
-    ctx.textAlign = "left"; ctx.fillStyle = "#aaa"; ctx.font = "16px sans-serif";
-    ctx.fillText("← 戻る", 20, 435);
-    ctx.textAlign = "center";
+    ctx.textAlign = "left"; ctx.fillStyle = "#aaa"; ctx.font = "16px sans-serif"; ctx.fillText("← 戻る", 20, 445); ctx.textAlign = "center";
 }
 
 // --- 描画 ---
@@ -1719,6 +1802,8 @@ function draw() {
         ctx.strokeStyle = '#d6c8ff'; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.arc(player.x, player.y, 38, 0, Math.PI * 2); ctx.stroke();
     }
+    if (player.poisonT > 0) { ctx.strokeStyle = '#7aff7a'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(player.x, player.y, 24, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }   // 毒状態
+    if (ch.id === 'ber' && player.hp < maxHP() * 0.5) { ctx.strokeStyle = 'rgba(255,70,50,0.7)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(player.x, player.y, 20 + 3 * Math.sin(performance.now() / 120), 0, Math.PI * 2); ctx.stroke(); }   // 狂戦士の気迫
     if (player.haste > 0) { // ハヤテの加速
         ctx.strokeStyle = '#9ff'; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(player.x, player.y, 21, 0, Math.PI * 2); ctx.stroke();
@@ -1726,6 +1811,7 @@ function draw() {
 
     if (pvp) drawOpp(); else drawBossShape(bossCfg, boss.x, boss.y, boss.w);
     if (story && !pvp) drawStoryFx();
+    if (!pvp && boss.poisonT > 0) { ctx.strokeStyle = '#7aff7a'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.w * 0.75, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
 
     // 弾は色ごとにまとめて描画（fillStyle切替とbeginPathの回数を削減）
     const groups = BSTYLE;
