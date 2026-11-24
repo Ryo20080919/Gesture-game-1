@@ -92,7 +92,7 @@ let pvp = false, online = false;        // true = 対人戦
 
 const CHARS = [
  {id:'mint',name:'ミント',shape:'drop',color:'#7be07b',hp:135,speed:2.8,
-  desc:['HP 135','移動 普通','グー/チョキ:弱い弾','パー:マナ10でHP+25','(攻撃は控えめ)']},
+  desc:['HP 135','移動 普通','グー/チョキ:弱い弾','パー:マナ10でHP+25','(回復は10秒に1回)']},
  {id:'don',name:'ドン',shape:'tri',color:'#ff7a3d',hp:210,speed:2.2,
   desc:['HP 210','移動 遅い','グー:放物線爆弾','チョキ:時限破片弾','パー:爆弾3連']},
  {id:'hayate',name:'ハヤテ',shape:'dia',color:'#7fe8ff',hp:150,speed:3.2,
@@ -106,9 +106,9 @@ CHARS.push(
  {id:'goro',name:'ゴロー',shape:'rock',color:'#b09070',hp:270,speed:2.0,
   desc:['HP 270','移動 とても遅い','グー:転がる岩','チョキ:小石散弾','パー:マナ14で岩の壁']},
  {id:'rai',name:'ライ',shape:'bolt',color:'#fff06a',hp:150,speed:3.0,
-  desc:['HP 150','移動 やや速い','グー:超高速の稲妻','チョキ:蛇行する稲妻','パー:マナ12で落雷']},
+  desc:['HP 150','移動 やや速い','グー:超高速の稲妻','チョキ:蛇行する稲妻','パー:マナ12で天の光線']},
  {id:'mira',name:'ミラ',shape:'mirror',color:'#d6c8ff',hp:160,speed:2.8,
-  desc:['HP 160','移動 普通','グー:光線','チョキ:無敵ダッシュ','パー:反射バリア']}
+  desc:['HP 160','移動 普通','グー:光線','チョキ:相手の技を真似る','パー:反射バリア']}
 );
 CHARS.push(   // ガチャで手に入る新キャラ（出る確率は SSR と同じ 2%）
  {id:'tec',name:'テック',shape:'gear',color:'#8fb8c8',hp:140,speed:2.6,gacha:true,
@@ -252,7 +252,7 @@ function chooseChar(i) {
 function startGame(lv) {
     setLayout('a'); bn = equipBonus(ch.id); costAcc = 0;   // 装備ボーナスを有効に
     bossLv = lv; bossCfg = BOSSES[lv];
-    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0 });
+    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0, healCd:0 });
     Object.assign(boss, { x:650, y:340, vx:2.0, vy:0, w:bossCfg.size, h:bossCfg.size, hp:bossCfg.hp,
                           maxHp:bossCfg.hp, jumpPower:bossCfg.jump, moveTimer:0, atk:0, dropPlat:null, standing:null, poisonT:0, poisonD:0 });
     bullets = []; bossBullets = []; clones = [];
@@ -393,7 +393,7 @@ navigator.mediaDevices.getUserMedia({
 
 // --- 対人戦（PeerJS / WebRTC）---
 // 各端末は「自分=左側」で動かし、相手は左右反転して表示する。ダメージ判定は被弾する側が行う。
-let peer = null, conn = null, sentHello = false, netNote = "", tick = 0, bid = 0, dead = new Set();
+let peer = null, conn = null, sentHello = false, netNote = "", tick = 0, bid = 0, dead = new Set(); const beamT = {};
 let oppCh = CHARS[0], opp = { x:100, y:350, hp:100, inv:0, rf:0, c:[], b:[] };
 const lobbyEl = document.getElementById('lobby'), lobbyMsgEl = document.getElementById('lobbyMsg');
 const lobbyMsg = t => lobbyMsgEl.textContent = t;
@@ -669,7 +669,7 @@ function startPvp() {
     settled = false; ratingNote = "";
     if (online) try { localStorage.setItem('spiritarena-inmatch', JSON.stringify({ opp:oppRating, mid:matchId, uid:oppUid })); } catch (e) {}
     showLobby(false);
-    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0 });
+    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0, healCd:0 });
     Object.assign(boss, { x:700, y:350, w:30, h:30, vx:0, vy:0 });
     bullets = []; bossBullets = []; clones = []; dead = new Set();
     opp = { x:100, y:350, hp:oppCh.hp, inv:0, rf:0, c:[], b:[] };
@@ -702,19 +702,24 @@ function sendState(force) {
     if (!force && (tick++ & 1)) return;                    // 約30回/秒
     for (const b of bullets) if (b.id === undefined) b.id = ++bid;
     conn.send({ t:'s', x:player.x, y:player.y, hp:player.hp, inv:(player.haste > 0 || player.invuln > 0) ? 1 : 0, rf:player.charge | 0, rv:player.reflect > 0 ? 1 : 0,
-                c: clones.map(c => [c.x, c.y, c.guard ? 1 : 0, c.hits]),
-                b: bullets.map(b => [b.id, b.x, b.y, b.power, b.type]) });
+                c: clones.map(c => [c.x, c.y, c.guard ? 1 : 0, Math.max(1, Math.ceil(c.hp / c.maxHp * 3))]),
+                b: bullets.map(b => [b.id, b.x, b.y, b.power, b.type, b.delay > 0 ? 1 : 0]) });
 }
 
 // 相手の弾 → 分身 / 反射バリア / 自分 の順に当たり判定
 function processOppBullets() {
-    for (const [id, bx0, by, power, btype] of opp.b) {
+    for (const [id, bx0, by, power, btype, bwarn] of opp.b) {
         if (dead.has(id)) continue;
         const bx = 800 - bx0;
+        if (btype === 'beam') {   // 上からのレーザー：予備動作は無害。当たっている間は、少しずつ連続ダメージ
+            const now = performance.now();
+            if (!bwarn && player.invuln <= 0 && Math.abs(bx - player.x) < 22 && now - (beamT[id] || 0) > 100) { beamT[id] = now; player.hp = Math.max(0, player.hp - power); }
+            continue;
+        }
         let used = false;
         for (let k = clones.length - 1; k >= 0; k--) {
             const c = clones[k];
-            if (Math.abs(bx - c.x) < 20 && Math.abs(by - c.y) < 20) { if (--c.hits <= 0) clones.splice(k, 1); used = true; break; }
+            if (Math.abs(bx - c.x) < 20 && Math.abs(by - c.y) < 20) { c.hp -= power; if (c.hp <= 0) clones.splice(k, 1); used = true; break; }
         }
         if (!used && player.reflect > 0 && Math.hypot(bx - player.x, by - player.y) < 40) {
             const ra = Math.atan2(boss.y - by, boss.x - bx);   // 反射した瞬間の相手の位置に向け、そのあとは直進
@@ -742,6 +747,8 @@ const COST = {
 function attack() {
     const x = player.x, y = player.y, g = currentGesture, n0 = bullets.length;
     const F = o => bullets.push(Object.assign({ x, y, vy:0, life:140 }, o));
+    let cid = ch.id;
+    if (cid === 'mira' && g === "Scissors" && pvp && oppCh && oppCh.id !== 'mira') cid = oppCh.id;   // ミラのチョキ：対戦相手のチョキの技を真似る
     if (ch.id === 'luna') { // ルナ：グー長押しでチャージ → 離すと発射
         if (g === "Rock") { if (ammo >= 3 && player.charge < 90) player.charge++; }
         else if (player.charge > 0) {
@@ -750,13 +757,13 @@ function attack() {
         }
     }
     if (shotCooldown > 0) return;
-    switch (ch.id) {
+    switch (cid) {
     case 'mint': // 癒し手：攻撃は弱め、パーで回復
         if (g === "Rock" && ammo >= 1) { F({ vx:7, power:12, type:'seed' }); ammo -= 1; shotCooldown = 28; }
         else if (g === "Scissors" && ammo >= 2) {
             for (const d of [-1, 1]) F({ y:y + d * 10, vx:5.5, baseYo:y + d * 10, angle:d > 0 ? 0 : Math.PI, power:8, type:'leaf' });
             ammo -= 2; shotCooldown = 26;
-        } else if (g === "Paper" && ammo >= 10 && player.hp < maxHP()) { player.hp = Math.min(maxHP(), player.hp + 25); ammo -= 10; shotCooldown = 90; }
+        } else if (g === "Paper" && ammo >= 10 && player.hp < maxHP() && !(player.healCd > 0)) { player.hp = Math.min(maxHP(), player.hp + 25); ammo -= 10; shotCooldown = 90; player.healCd = 600; }   // 回復は10秒に1回
         break;
     case 'don': // 鬼：放物線の爆弾
         if (g === "Rock" && ammo >= 3) { F({ vx:8, vy:-5.5, grav:0.2, power:42, type:'bomb' }); ammo -= 3; shotCooldown = 55; }
@@ -794,8 +801,8 @@ function attack() {
             for (const d of [-1, 1]) F({ y:y + d * 10, vx:9, baseYo:y + d * 10, angle:d > 0 ? 0 : Math.PI, power:11, type:'zig', life:100 });
             ammo -= 2; shotCooldown = 26;
         } else if (g === "Paper" && ammo >= 12) {
-            bullets.push({ x:boss.x, y:-10, vx:0, vy:14, power:45, type:'bolt', delay:35, life:140 });
-            ammo -= 12; shotCooldown = 80;
+            bullets.push({ x:boss.x, y:225, vx:0, vy:0, power:14, type:'beam', bw:22, bh:230, multi:6, pierce:true, delay:25, ttl:42, life:100 });   // 天からのレーザー：相手を追い、当たっている間ずっとダメージ
+            ammo -= 12; shotCooldown = 90;
         }
         break;
     case 'mira': // 鏡：光線・無敵ダッシュ・反射バリア
@@ -807,7 +814,7 @@ function attack() {
     case 'tec': // メカニック：砲台を最大3台そなえる（砲台は自動で撃ち、パーで一斉射撃）
         if (g === "Rock" && ammo >= 1) { F({ vx:8, power:14, type:'seed' }); ammo -= 1; shotCooldown = 26; }
         else if (g === "Scissors" && ammo >= 6 && clones.length < 3) {
-            clones.push({ x:Math.max(15, Math.min(385, x + 30 + clones.length * 28)), y, vy:0, guard:false, turret:true, hits:1, floorOnly:!player.isGround, t:clones.length * 25 });
+            clones.push({ x:Math.max(15, Math.min(385, x + 30 + clones.length * 28)), y, vy:0, guard:false, turret:true, hp:30, maxHp:30, floorOnly:!player.isGround, t:clones.length * 25 });
             ammo -= 6; shotCooldown = 40;
         } else if (g === "Paper" && ammo >= 8 && clones.length) {
             for (const c of clones) { c.flash = 14; for (const d of [-0.2, 0, 0.2]) bullets.push({ x:c.x, y:c.y, vx:Math.cos(d) * 7.5, vy:Math.sin(d) * 7.5, power:16, type:'cannon', life:140 }); }   // 発射の輪が光り、橙の弾が3方向に出る
@@ -975,6 +982,7 @@ function update() {
     if (player.poisonT > 0 && player.poisonT-- % 30 === 0) { player.hp -= player.poisonD; if (player.hp <= 0) { player.hp = 0; gameState = "gameover"; if (pvp) sendState(true); } }
     if (shotCooldown > 0) shotCooldown = Math.max(0, shotCooldown - (1 + bn.rate));   // 連射の装備
     if (player.haste > 0) player.haste--;
+    if (player.healCd > 0) player.healCd--;
     if (player.invuln > 0) player.invuln--;
     if (player.reflect > 0) player.reflect--;
     if (currentGesture === "No Hand" && Math.random() < 0.18 * (1 + bn.regen) && ammo < 30) ammo++;   // マナ回復の装備
@@ -983,7 +991,9 @@ function update() {
 
     for (let i = bullets.length - 1; i >= 0; i--) {
         const b = bullets[i];
-        if (b.delay > 0) { b.delay--; continue; } // 落雷の予備動作
+        if (b.type === 'beam') b.x += (boss.x - b.x) * (b.delay > 0 ? 0.25 : 0.1);   // 上からのレーザーは、相手を追う
+        if (b.delay > 0) { b.delay--; continue; } // 予備動作
+        if (b.ttl !== undefined && --b.ttl <= 0) { bullets.splice(i, 1); continue; }   // レーザーが消えるまで
         if (b.explode && --b.explode <= 0) { // 時限爆弾：扇状に破片を飛ばす
             for (let k = -3; k <= 3; k++) { const a = k * 0.28; bullets.push({x:b.x, y:b.y, vx:Math.cos(a) * 6, vy:Math.sin(a) * 6, power:11, type:'frag', life:50}); }
             bullets.splice(i, 1); continue;
@@ -992,17 +1002,16 @@ function update() {
             const a = Math.atan2(boss.y - b.y, boss.x - b.x);
             b.x += Math.cos(a) * b.spd; b.y += Math.sin(a) * b.spd;
         } else {
-            if (b.boom) { b.vx -= 0.07; if (b.vx < 0 && !b.back) { b.back = true; b.hit = false; } } // ブーメランは戻ってくる
+            if (b.boom) { b.vx -= 0.05; if (b.x > 790 && b.vx > 0) b.vx = 0; if (b.vx < 0 && !b.back) { b.back = true; b.hit = false; } } // ブーメランは戻ってくる
             b.x += b.vx;
             if (b.baseYo !== undefined) { b.angle += 0.12; b.y = b.baseYo + Math.sin(b.angle) * 35; }
             else { b.y += b.vy; if (b.grav) b.vy += b.grav; }
         }
         b.life--;
 
-        if (!pvp && b.x > boss.x - boss.w/2 && b.x < boss.x + boss.w/2 &&
-            b.y > boss.y - boss.h/2 && b.y < boss.y + boss.h/2) {
-            if (!b.hit) { // 貫通弾は1発につき1回だけダメージ（シールド中は無効）
-                b.hit = true;
+        if (!pvp && Math.abs(b.x - boss.x) < boss.w/2 + (b.bw || 0) && Math.abs(b.y - boss.y) < boss.h/2 + (b.bh || 0)) {
+            if (!b.hit || (b.multi && --b.mc <= 0)) { // 貫通弾は1発につき1回（レーザーは連続ヒット）
+                b.hit = true; b.mc = b.multi || 0;
                 if (!boss.shield) {
                     boss.hp -= Math.max(1, Math.round(b.power * (1 + bn.atk)));   // 攻撃力の装備
                     const pz = POISON[b.type]; if (pz) { boss.poisonT = pz[0]; boss.poisonD = pz[1]; }   // 毒
@@ -1080,7 +1089,7 @@ function hitClone(bb) {
     for (let k = clones.length - 1; k >= 0; k--) {
         const c = clones[k];
         if (Math.abs(bb.x - c.x) < 20 && Math.abs(bb.y - c.y) < 20) {
-            if (--c.hits <= 0) clones.splice(k, 1);
+            c.hp -= (bb.dmg || 15); if (c.hp <= 0) clones.splice(k, 1);
             return true;
         }
     }
@@ -1103,6 +1112,7 @@ function drawOpp() {
         ctx.beginPath(); ctx.arc(boss.x, boss.y, 38, 0, Math.PI * 2); ctx.stroke();
     }
     for (const b of opp.b) {
+        if (b[4] === 'beam') { const w = b[5]; ctx.globalAlpha = w ? 0.55 : 0.9; ctx.fillStyle = w ? '#fff6a0' : '#ffe97a'; ctx.fillRect(800 - b[1] - (w ? 2 : 22), 0, w ? 4 : 44, 400); ctx.globalAlpha = 1; continue; }
         const g = BSTYLE[b[4]] || ['#fff', 4];
         ctx.fillStyle = g[0]; ctx.beginPath(); ctx.arc(800 - b[1], b[2], g[1], 0, Math.PI * 2); ctx.fill();
     }
@@ -1667,7 +1677,7 @@ function drawMode() {
 function placeClone() {
     const guard = ch.id === 'goro';
     clones = [{ x: Math.max(15, Math.min(385, player.x + (guard ? 45 : 40))), y: player.y, vy: 0, guard, turret: false,
-                hits: guard ? 3 : 1, floorOnly: !player.isGround, t: 0 }];
+                hp: guard ? 100 : 80, maxHp: guard ? 100 : 80, floorOnly: !player.isGround, t: 0 }];
     return true;
 }
 
@@ -1804,7 +1814,8 @@ function draw() {
     }
 
     for (const c of clones) {
-        drawShape(ch.shape, c.x, c.y, 15, ch.color, c.guard ? 0.3 + 0.25 * c.hits : 0.55);
+        drawShape(ch.shape, c.x, c.y, 15, ch.color, c.guard ? 0.3 + 0.25 * Math.ceil(c.hp / c.maxHp * 3) : 0.55);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(c.x - 14, c.y - 27, 28, 5); ctx.fillStyle = '#4eef90'; ctx.fillRect(c.x - 13, c.y - 26, 26 * Math.max(0, c.hp / c.maxHp), 3);   // 分身のHPバー
         if (c.flash > 0) { ctx.strokeStyle = '#ffd27a'; ctx.lineWidth = 3; ctx.globalAlpha = c.flash / 14; ctx.beginPath(); ctx.arc(c.x, c.y, 16 + (14 - c.flash) * 1.6, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1; c.flash--; }   // 砲台の発射の光
     }
     drawShape(ch.shape, player.x, player.y, 15, ch.color, player.invuln > 0 ? 0.35 : 1);
@@ -1840,6 +1851,12 @@ function draw() {
         }
         ctx.fill();
     }
+    for (const b of bullets) if (b.type === 'beam') {   // 上からのレーザー：予備動作は細い線、発射中は太い光の柱
+        const warn = b.delay > 0;
+        ctx.globalAlpha = warn ? 0.55 : 0.9; ctx.fillStyle = warn ? '#fff6a0' : '#ffe97a'; ctx.fillRect(b.x - (warn ? 2 : b.bw), 0, warn ? 4 : b.bw * 2, 400);
+        if (!warn) { ctx.fillStyle = '#ffffff'; ctx.fillRect(b.x - b.bw * 0.4, 0, b.bw * 0.8, 400); }
+        ctx.globalAlpha = 1;
+    }
     for (const bb of bossBullets) {   // 敵の弾（色・大きさ・四角は弾ごと）
         ctx.fillStyle = bb.color || '#ff33ff';
         if (bb.w) ctx.fillRect(bb.x - bb.w / 2, bb.y - bb.h / 2, bb.w, bb.h);
@@ -1855,7 +1872,7 @@ function draw() {
         ctx.strokeStyle = empty && blink ? "#ff4d4d" : "rgba(255,255,255,0.5)"; ctx.lineWidth = 2; ctx.strokeRect(10, 8, 150, 16);
         ctx.textAlign = "left"; ctx.font = "bold 13px sans-serif"; ctx.fillStyle = "white"; ctx.fillText("マナ", 168, 21);
         if (empty) { ctx.fillStyle = blink ? "#ff6b6b" : "#ffb3b3"; ctx.fillText("マナ切れ！ 手をカメラから外すと回復", 200, 21); }
-        const need = (COST[ch.id] || {})[currentGesture];
+        const need = (COST[(ch.id === 'mira' && currentGesture === 'Scissors' && pvp && oppCh.id !== 'mira') ? oppCh.id : ch.id] || {})[currentGesture];
         if (gameState === "playing" && need !== undefined && ammo < need) {   // 出そうとした技のマナが足りない
             ctx.textAlign = "center"; ctx.font = "bold 16px sans-serif";
             ctx.fillStyle = blink ? "#ff6b6b" : "#ffd0d0";
@@ -1873,6 +1890,7 @@ function draw() {
         };
         bar(10, 28, 150, player.hp, maxHP());
         ctx.textAlign = "left"; ctx.font = "bold 13px sans-serif"; ctx.fillStyle = "white"; ctx.fillText("HP", 168, 41);
+        if (ch.id === 'mint') { ctx.fillStyle = player.healCd > 0 ? "#ffb347" : "#7be07b"; ctx.fillText(player.healCd > 0 ? `回復 あと${Math.ceil(player.healCd / 60)}秒` : "回復 OK", 200, 41); }
         bar(640, 8, 150, pvp ? opp.hp : boss.hp, pvp ? oppCh.hp : boss.maxHp, "#ff6b8a");
         ctx.textAlign = "right"; ctx.fillText(pvp ? oppName : story ? bossCfg.name : `${BOSSES[bossLv].sub} Lv${bossLv + 1}`, 790, 38);
     }
