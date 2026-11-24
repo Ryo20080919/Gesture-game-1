@@ -258,6 +258,7 @@ function startGame(lv) {
     bullets = []; bossBullets = []; clones = [];
     ammo = 30; shotCooldown = 0; bossShootCooldown = 0; currentGesture = "No Hand";
     player.hp = maxHP();   // 最大HPの装備ボーナス
+    lastHp = player.hp; hurtT = 0; hurtParts = []; dmgTexts = [];
     gameState = "playing";
 }
 canvasElement.addEventListener('pointerdown', e => {
@@ -402,11 +403,11 @@ function showLobby(on) {
     for (const id of ['rowHost', 'rowJoin']) document.getElementById(id).style.display = (online || inRoom) ? 'none' : '';
     if (on) lobbyMsg(inRoom ? '相手のキャラ選択を待っています…' : online ? '対戦相手を探しています…' : 'ルームを作る か、相手のコードを入力');
 }
-let qpeer = null, matching = false, matchTimer = null;
+let qpeer = null, qpeer2 = null, matching = false, matchTimer = null;
 let myRematch = false, oppRematch = false, oppLeft = false;   // 友達対戦：再戦の希望 / 相手が退出済み
 let inRoom = false, mySelected = false, oppReady = false, versusAt = 0;   // 友達対戦の部屋にいるか / 再戦のキャラ選択の状況 / 対戦前の紹介画面
-function resetPeer() { try { conn && conn.close(); peer && peer.destroy(); qpeer && qpeer.destroy(); } catch (e) {} conn = null; peer = null; qpeer = null; sentHello = false; }
-function closeNet() { matching = false; inRoom = false; clearTimeout(matchTimer); resetPeer(); showLobby(false); }
+function resetPeer() { try { conn && conn.close(); peer && peer.destroy(); qpeer && qpeer.destroy(); qpeer2 && qpeer2.destroy(); } catch (e) {} conn = null; peer = null; qpeer = null; qpeer2 = null; sentHello = false; }
+function closeNet() { matching = false; inRoom = false; clearTimeout(matchTimer); resetPeer(); if (warm) { try { warm.destroy(); } catch (e) {} warm = null; } showLobby(false); }
 
 // --- レート ---（この端末のブラウザに保存。サーバーが無いので端末内の記録です）
 let rating = 1000, wins = 0, losses = 0, oppRating = 1000, settled = false, ratingNote = "", abandonNote = "";
@@ -523,6 +524,7 @@ $('btnAuthClose').addEventListener('click', () => { $('auth').style.display = 'n
 function pickMode(i) {   // オンライン対戦はログインが必要（サーバー設定時）
     if (i === 3 && sb && !user) { showAuth('オンライン対戦にはログインが必要です'); return; }
     pvp = i === 2 || i === 3; online = i === 3; story = i === 1 ? {} : null; selPage = 0; gameState = "select";
+    if (i === 3) warmUp();   // オンライン：先に通信の準備
 }
 async function openRanking() {
     gameState = "ranking"; rankRows = null; myRank = 0;
@@ -573,7 +575,7 @@ document.getElementById('btnNameClose').addEventListener('click', () => { docume
 
 // --- オンライン対戦（レートの近い相手を探す）---
 // レートを150刻みの「帯」に分け、帯ごとに待ち合わせID(QUEUE)を用意。同じ帯→隣の帯…と、時間がたつほど探す範囲を広げる
-const bucketOf = r => Math.floor(r / 150), queueId = b => 'spiritarena-queue-r' + b;
+const bucketOf = r => Math.floor(r / 150), queueId = b => 'spiritarena-queue-r' + b, ANY_ID = 'spiritarena-queue-any';   // ANY = 全員が最初にのぞく、共通の待機部屋
 let matchStart = 0;
 function matchRetry(ms) { if (!matching) return; clearTimeout(matchTimer); matchTimer = setTimeout(findMatch, ms || 300 + Math.random() * 600); }
 function watchdog() { setTimeout(() => { if (matching && gameState === "lobby") findMatch(); }, 8000); }   // つながらなければ探し直す
@@ -589,27 +591,33 @@ function findMatch() {
     resetPeer();
     isHost = false; matchId = null;
     lobbyMsg(`対戦相手を探しています…\nあなたのレート: ${rating}`);
-    const list = candidates(), me = peer = new Peer(), st = { done:false, fails:0 };
-    const fail = () => { if (!st.done && ++st.fails >= list.length) becomeWaiter(); };   // 全部の帯に誰もいなかった → 自分が待機役になる
-    me.on('open', () => list.forEach((b, i) => setTimeout(() => {   // 近い帯から、少しずつずらして「同時に」当たってみる（1つずつ順番に待たない）
+    // 待機部屋(ANY)と、近いレートの待機部屋を「同時に」のぞいて、待っている人がいればすぐ対戦。誰もいなければ自分が待機する
+    const bs = candidates(), ids = [{ id:queueId(bs[0]), d:0 }, { id:ANY_ID, d:200 }];
+    bs.slice(1).forEach((b, k) => ids.push({ id:queueId(b), d:100 * (k + 1) }));
+    const me = peer = (warm && !warm.destroyed) ? warm : new Peer(), st = { done:false, fails:0 };
+    warm = null;
+    const fail = () => { if (!st.done && ++st.fails >= ids.length) becomeWaiter(); };   // 誰も待っていなかった → 自分が待機役になる
+    const go = () => ids.forEach(({ id, d }) => setTimeout(() => {
         if (!matching || st.done || peer !== me) return;
-        const q = me.connect(queueId(b));
+        const q = me.connect(id);
         q.on('data', m => { if (m.t === 'room' && !st.done) { st.done = true; setupConn(me.connect(m.id)); q.close(); watchdog(); } });
         q.on('close', () => fail());
-    }, i * 80)));
+    }, d));
+    if (me.open) go(); else me.on('open', go);
     me.on('error', e => { if (st.done) return; if (e.type === 'peer-unavailable') fail(); else matchRetry(1500); });
 }
-function becomeWaiter() {
+function becomeWaiter() {   // 待機部屋に入る：自分のレート帯の部屋と、みんなが探しにくる共通の部屋(ANY)に待機
     resetPeer();
     lobbyMsg(`対戦相手を待っています…\nあなたのレート: ${rating}`);
-    const qp = qpeer = new Peer(queueId(bucketOf(rating)));
+    const qp = qpeer = new Peer(queueId(bucketOf(rating))), qp2 = qpeer2 = new Peer(ANY_ID);
     let taken = false;
     qp.on('error', e => matchRetry(e.type === 'unavailable-id' ? 700 : 1500));   // 先に取られた → 探す側に戻る
-    qp.on('open', () => {   // 待ち続けず、一定時間で探す範囲を広げて探し直す
+    qp2.on('error', e => matchRetry(e.type === 'unavailable-id' ? 300 : 1500));   // すでに待っている人がいる → すぐ探しに行く
+    qp.on('open', () => {   // 念のため、時々探し直す（新しく来た人は共通の部屋で見つかるので、長めでよい）
         clearTimeout(matchTimer);
-        matchTimer = setTimeout(() => { if (matching && gameState === "lobby" && !taken) findMatch(); }, 3500 + Math.random() * 2500);
+        matchTimer = setTimeout(() => { if (matching && gameState === "lobby" && !taken) findMatch(); }, 12000 + Math.random() * 6000);
     });
-    qp.on('connection', c => {
+    const onConn = c => {
         if (taken) { c.on('open', () => c.close()); return; }
         taken = true;
         isHost = true; matchId = 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);   // 試合ID（待機役が決める）
@@ -619,11 +627,19 @@ function becomeWaiter() {
         host.on('connection', setupConn);
         host.on('error', () => { taken = false; matchRetry(1000); });
         host.on('open', () => {
-            const send = () => { c.send({ t:'room', id:room }); setTimeout(() => { try { qp.destroy(); } catch (e) {} if (qpeer === qp) qpeer = null; }, 1500); };
+            const send = () => { c.send({ t:'room', id:room }); setTimeout(() => { try { qp.destroy(); qp2.destroy(); } catch (e) {} if (qpeer === qp) qpeer = null; if (qpeer2 === qp2) qpeer2 = null; }, 400); };   // 待機部屋をすぐ空ける
             c.open ? send() : c.on('open', send);
             watchdog();
         });
-    });
+    };
+    qp.on('connection', onConn); qp2.on('connection', onConn);
+}
+let warm = null;   // 「オンライン」を押した時点で、先に通信の準備をしておく（探し始めるまでの時間を短くする）
+function warmUp() {
+    if (typeof Peer === 'undefined' || warm) return;
+    const w = warm = new Peer();
+    w.on('error', () => { if (warm === w) warm = null; });
+    setTimeout(() => { if (warm === w) { try { w.destroy(); } catch (e) {} warm = null; } }, 90000);
 }
 function sayHello() { if (conn && conn.open && !sentHello) { sentHello = true; conn.send({ t:'hello', ch:ch.id, r:rating, name:playerName(), uid:user ? user.id : null, mid:matchId, map:pvpMap }); } }
 function setupConn(c) {
@@ -674,6 +690,7 @@ function startPvp() {
     bullets = []; bossBullets = []; clones = []; dead = new Set();
     opp = { x:100, y:350, hp:oppCh.hp, inv:0, rf:0, c:[], b:[] };
     ammo = 30; shotCooldown = 0; currentGesture = "No Hand"; netNote = "";
+    lastHp = player.hp; hurtT = 0; hurtParts = []; dmgTexts = [];
     gameState = "playing";
 }
 
@@ -853,6 +870,29 @@ function attack() {
         const m = 1 + (1 - player.hp / maxHP()) * 0.9;
         for (let i = n0; i < bullets.length; i++) bullets[i].power = Math.round(bullets[i].power * m);
     }
+}
+
+let lastHp = 0, hurtT = 0, hurtParts = [], dmgTexts = [];   // 被弾エフェクトの状態
+function hurtFx(d) {   // ダメージを受けた瞬間：画面ゆれ・赤いふち・キャラの赤い点滅・火花・ダメージ数字
+    hurtT = 24;
+    const poison = player.poisonT > 0 && d <= 8;   // 毒のダメージは緑
+    for (let k = 0; k < 14; k++) { const a = Math.random() * Math.PI * 2, v = 1.5 + Math.random() * 3.5; hurtParts.push({ x:player.x, y:player.y, vx:Math.cos(a) * v, vy:Math.sin(a) * v - 1, life:26, c:poison ? '#7aff7a' : '#ff5a4a' }); }
+    dmgTexts.push({ x:player.x + (Math.random() - 0.5) * 16, y:player.y - 22, t:44, v:d, c:poison ? '#9dff9d' : '#ff6b6b' });
+}
+function drawHurtFx() {
+    if (hurtT > 0) {
+        const a = hurtT / 24; ctx.fillStyle = `rgba(255,40,40,${0.5 * a})`;
+        ctx.fillRect(0, 0, 800, 26); ctx.fillRect(0, 424, 800, 26); ctx.fillRect(0, 26, 26, 398); ctx.fillRect(774, 26, 26, 398);   // 画面のふちが赤くなる
+        if (hurtT % 6 < 3) drawShape(ch.shape, player.x, player.y, 17, '#ff3b3b', 0.8);   // キャラが赤く点滅
+        ctx.strokeStyle = `rgba(255,255,255,${a})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(player.x, player.y, 14 + (24 - hurtT) * 1.4, 0, Math.PI * 2); ctx.stroke();   // 衝撃の輪
+        hurtT--;
+    }
+    hurtParts = hurtParts.filter(p => p.life > 0);
+    for (const p of hurtParts) { p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--; ctx.globalAlpha = Math.max(0, p.life / 26); ctx.fillStyle = p.c; ctx.fillRect(p.x, p.y, 4, 4); }
+    ctx.globalAlpha = 1;
+    dmgTexts = dmgTexts.filter(t => t.t > 0);
+    for (const t of dmgTexts) { t.t--; t.y -= 0.9; ctx.globalAlpha = Math.min(1, t.t / 20); ctx.font = "bold 20px sans-serif"; ctx.textAlign = "center"; ctx.lineWidth = 4; ctx.strokeStyle = "#000"; ctx.strokeText(`-${t.v}`, t.x, t.y); ctx.fillStyle = t.c; ctx.fillText(`-${t.v}`, t.x, t.y); }
+    ctx.globalAlpha = 1;
 }
 
 function drawBG(t) { // 月と蛍
@@ -1803,6 +1843,7 @@ function draw() {
     if (gameState === "select") { drawSelect(); return; }
     if (gameState === "bossSelect") { drawBossSelect(); return; }
 
+    ctx.save(); if (hurtT > 10) ctx.translate((Math.random() - 0.5) * 7, (Math.random() - 0.5) * 7);   // 被弾の画面ゆれ
     { const tn = story ? bossCfg.tint : (pvp && online ? MAPTINT[pvpMap] : null); if (tn) { ctx.fillStyle = tn; ctx.fillRect(0, 0, 800, 450); } }
     ctx.strokeStyle = '#3d5a46'; ctx.lineWidth = 2; ctx.setLineDash([5,5]);
     ctx.beginPath(); ctx.moveTo(400,0); ctx.lineTo(400,450); ctx.stroke();
@@ -1863,6 +1904,10 @@ function draw() {
         else { ctx.beginPath(); ctx.arc(bb.x, bb.y, bb.r || 6, 0, Math.PI*2); ctx.fill(); }
     }
 
+    ctx.restore();   // ゆれはここまで
+    if (player.hp < lastHp) hurtFx(lastHp - player.hp);   // どんな原因でも、HPが減ったらエフェクト
+    lastHp = player.hp;
+    drawHurtFx();
     if (online && pvp && !settled && (gameState === "clear" || gameState === "gameover")) settle(gameState === "clear");
     if (gameState === "playing" || gameState === "paused") {   // マナゲージ（左上）と、マナ切れ・マナ不足の警告
         const blink = Math.floor(performance.now() / 250) % 2 === 0;
