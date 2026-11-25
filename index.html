@@ -258,7 +258,7 @@ function startGame(lv) {
     bullets = []; bossBullets = []; clones = [];
     ammo = 30; shotCooldown = 0; bossShootCooldown = 0; currentGesture = "No Hand";
     player.hp = maxHP();   // 最大HPの装備ボーナス
-    lastHp = player.hp; hurtT = 0; hurtParts = []; dmgTexts = [];
+    lastHp = player.hp; lastEh = boss.hp; hurtT = 0; hurtParts = []; dmgTexts = [];
     gameState = "playing";
 }
 canvasElement.addEventListener('pointerdown', e => {
@@ -690,7 +690,7 @@ function startPvp() {
     bullets = []; bossBullets = []; clones = []; dead = new Set();
     opp = { x:100, y:350, hp:oppCh.hp, inv:0, rf:0, c:[], b:[] };
     ammo = 30; shotCooldown = 0; currentGesture = "No Hand"; netNote = "";
-    lastHp = player.hp; hurtT = 0; hurtParts = []; dmgTexts = [];
+    lastHp = player.hp; lastEh = opp.hp; hurtT = 0; hurtParts = []; dmgTexts = [];
     gameState = "playing";
 }
 
@@ -719,7 +719,7 @@ function sendState(force) {
     if (!force && (tick++ & 1)) return;                    // 約30回/秒
     for (const b of bullets) if (b.id === undefined) b.id = ++bid;
     conn.send({ t:'s', x:player.x, y:player.y, hp:player.hp, inv:(player.haste > 0 || player.invuln > 0) ? 1 : 0, rf:player.charge | 0, rv:player.reflect > 0 ? 1 : 0,
-                c: clones.map(c => [c.x, c.y, c.guard ? 1 : 0, Math.max(1, Math.ceil(c.hp / c.maxHp * 3))]),
+                c: clones.map(c => [c.x, c.y, c.guard ? 1 : 0, Math.max(1, Math.round(c.hp / c.maxHp * 100))]),   // 残りHPの割合(%)
                 b: bullets.map(b => [b.id, b.x, b.y, b.power, b.type, b.delay > 0 ? 1 : 0]) });
 }
 
@@ -730,7 +730,7 @@ function processOppBullets() {
         const bx = 800 - bx0;
         if (btype === 'beam') {   // 上からのレーザー：予備動作は無害。当たっている間は、少しずつ連続ダメージ
             const now = performance.now();
-            if (!bwarn && player.invuln <= 0 && Math.abs(bx - player.x) < 22 && now - (beamT[id] || 0) > 100) { beamT[id] = now; player.hp = Math.max(0, player.hp - power); }
+            if (!bwarn && player.invuln <= 0 && Math.abs(bx - player.x) < 22 && now - (beamT[id] || 0) > 133) { beamT[id] = now; player.hp = Math.max(0, player.hp - power); }
             continue;
         }
         let used = false;
@@ -790,14 +790,14 @@ function attack() {
     case 'hayate': // 風：ブーメランと加速
         if (g === "Rock" && ammo >= 1) { F({ vx:8, power:18, type:'boom', boom:true, pierce:true, life:170 }); ammo -= 1; shotCooldown = 38; }
         else if (g === "Scissors" && ammo >= 3) {
-            for (const d of [-0.12, 0, 0.12]) F({ vx:Math.cos(d) * 10, vy:Math.sin(d) * 10, power:8, type:'wind', life:100 });
+            for (const d of [-0.12, 0, 0.12]) F({ vx:Math.cos(d) * 8, vy:Math.sin(d) * 8, power:8, type:'wind', life:100 });
             ammo -= 3; shotCooldown = 24;
         } else if (g === "Paper" && ammo >= 6 && player.haste <= 0) { player.haste = 240; ammo -= 6; shotCooldown = 20; }
         break;
     case 'yomi': // 忍：手裏剣と、同じ攻撃を真似る影分身
-        if (g === "Rock" && ammo >= 1) { F({ vx:10, power:15, type:'shuri' }); ammo -= 1; shotCooldown = 24; }
+        if (g === "Rock" && ammo >= 1) { F({ vx:8.5, power:15, type:'shuri' }); ammo -= 1; shotCooldown = 24; }
         else if (g === "Scissors" && ammo >= 3) {
-            for (const d of [-0.2, 0, 0.2]) F({ vx:Math.cos(d) * 8.5, vy:Math.sin(d) * 8.5, power:8, type:'shuri' });
+            for (const d of [-0.2, 0, 0.2]) F({ vx:Math.cos(d) * 7.5, vy:Math.sin(d) * 7.5, power:8, type:'shuri' });
             ammo -= 3; shotCooldown = 30;
         } else if (g === "Paper" && ammo >= 12 && placeClone()) { ammo -= 12; shotCooldown = 40; }
         if (clones.length && bullets.length > n0) { // 影分身も同じ弾を撃つ
@@ -813,17 +813,17 @@ function attack() {
         } else if (g === "Paper" && ammo >= 14 && placeClone()) { ammo -= 14; shotCooldown = 60; }
         break;
     case 'rai': // 雷：高速弾と、相手の位置に落ちる落雷
-        if (g === "Rock" && ammo >= 1) { F({ vx:14, power:14, type:'bolt', life:70 }); ammo -= 1; shotCooldown = 18; }
+        if (g === "Rock" && ammo >= 1) { F({ vx:9.5, power:14, type:'bolt', life:100 }); ammo -= 1; shotCooldown = 18; }
         else if (g === "Scissors" && ammo >= 2) {
-            for (const d of [-1, 1]) F({ y:y + d * 10, vx:9, baseYo:y + d * 10, angle:d > 0 ? 0 : Math.PI, power:11, type:'zig', life:100 });
+            for (const d of [-1, 1]) F({ y:y + d * 10, vx:8, baseYo:y + d * 10, angle:d > 0 ? 0 : Math.PI, power:11, type:'zig', life:100 });
             ammo -= 2; shotCooldown = 26;
         } else if (g === "Paper" && ammo >= 12) {
-            bullets.push({ x:boss.x, y:225, vx:0, vy:0, power:14, type:'beam', bw:22, bh:230, multi:6, pierce:true, delay:25, ttl:42, life:100 });   // 天からのレーザー：相手を追い、当たっている間ずっとダメージ
-            ammo -= 12; shotCooldown = 90;
+            bullets.push({ x:boss.x, y:225, vx:0, vy:0, power:12, type:'beam', bw:22, bh:230, multi:8, pierce:true, delay:25, ttl:40, life:100 });   // 天からのレーザー：相手を追い、当たっている間ずっとダメージ
+            ammo -= 12; shotCooldown = 100;
         }
         break;
     case 'mira': // 鏡：光線・無敵ダッシュ・反射バリア
-        if (g === "Rock" && ammo >= 2) { F({ vx:12, power:22, type:'ray', life:80 }); ammo -= 2; shotCooldown = 30; }
+        if (g === "Rock" && ammo >= 2) { F({ vx:9, power:22, type:'ray', life:100 }); ammo -= 2; shotCooldown = 30; }
         else if (g === "Scissors" && ammo >= 3) {
             player.x = Math.max(15, Math.min(385, x + (keys.left ? -90 : 90))); player.invuln = 25; ammo -= 3; shotCooldown = 50;
         } else if (g === "Paper" && ammo >= 8) { player.reflect = 80; ammo -= 8; shotCooldown = 100; }
@@ -839,18 +839,18 @@ function attack() {
         }
         break;
     case 'gat': // ガトリング：連射と弾幕。パーはマナを一気に回復
-        if (g === "Rock" && ammo >= 1) { F({ vx:11, vy:(Math.random() - 0.5) * 0.9, power:5, type:'seed' }); player.gc = (player.gc || 0) + 1; if (player.gc % 2 === 0) ammo -= 1; shotCooldown = 4; }
+        if (g === "Rock" && ammo >= 1) { F({ vx:9, vy:(Math.random() - 0.5) * 0.9, power:5, type:'seed' }); player.gc = (player.gc || 0) + 1; if (player.gc % 2 === 0) ammo -= 1; shotCooldown = 4; }
         else if (g === "Scissors" && ammo >= 4) { for (let k = -3; k <= 3; k++) F({ vx:Math.cos(k * 0.12) * 9, vy:Math.sin(k * 0.12) * 9, power:6, type:'wind', life:100 }); ammo -= 4; shotCooldown = 36; }
         else if (g === "Paper" && ammo < 24) { ammo = Math.min(30, ammo + 14); shotCooldown = 150; }
         break;
     case 'poi': // 毒使い：当てた相手に、じわじわ効く毒
-        if (g === "Rock" && ammo >= 1) { F({ vx:9, power:6, type:'dart' }); ammo -= 1; shotCooldown = 22; }
-        else if (g === "Scissors" && ammo >= 2) { for (const d of [-0.18, 0, 0.18]) F({ vx:Math.cos(d) * 8.5, vy:Math.sin(d) * 8.5, power:5, type:'dart' }); ammo -= 2; shotCooldown = 30; }
+        if (g === "Rock" && ammo >= 1) { F({ vx:8, power:6, type:'dart' }); ammo -= 1; shotCooldown = 22; }
+        else if (g === "Scissors" && ammo >= 2) { for (const d of [-0.18, 0, 0.18]) F({ vx:Math.cos(d) * 7.5, vy:Math.sin(d) * 7.5, power:5, type:'dart' }); ammo -= 2; shotCooldown = 30; }
         else if (g === "Paper" && ammo >= 5) { F({ vx:4.5, power:10, type:'venom' }); ammo -= 5; shotCooldown = 70; }
         break;
     case 'ber': // 狂戦士：HPが減るほど攻撃力アップ。パーはHPを払ってマナ全回復
-        if (g === "Rock" && ammo >= 2) { F({ vx:9, power:24, type:'axe' }); ammo -= 2; shotCooldown = 28; }
-        else if (g === "Scissors" && ammo >= 3) { for (const d of [-0.2, 0, 0.2]) F({ vx:Math.cos(d) * 8.5, vy:Math.sin(d) * 8.5, power:12, type:'axe' }); ammo -= 3; shotCooldown = 30; }
+        if (g === "Rock" && ammo >= 2) { F({ vx:8, power:24, type:'axe' }); ammo -= 2; shotCooldown = 28; }
+        else if (g === "Scissors" && ammo >= 3) { for (const d of [-0.2, 0, 0.2]) F({ vx:Math.cos(d) * 7.5, vy:Math.sin(d) * 7.5, power:12, type:'axe' }); ammo -= 3; shotCooldown = 30; }
         else if (g === "Paper" && player.hp > maxHP() * 0.2 && ammo < 28) { player.hp = Math.max(1, player.hp - Math.round(maxHP() * 0.12)); ammo = 30; player.haste = 150; shotCooldown = 200; }
         break;
     case 'luna': // 月：追尾月光と流星群
@@ -872,26 +872,30 @@ function attack() {
     }
 }
 
-let lastHp = 0, hurtT = 0, hurtParts = [], dmgTexts = [];   // 被弾エフェクトの状態
-function hurtFx(d) {   // ダメージを受けた瞬間：画面ゆれ・赤いふち・キャラの赤い点滅・火花・ダメージ数字
-    hurtT = 24;
+let lastEh = 0, lastHp = 0, hurtT = 0, hurtParts = [], dmgTexts = [];   // 被弾エフェクトの状態
+function hurtFx(d) {   // ダメージを受けた時のエフェクト（控えめ：ダメージが大きいときだけ、画面ゆれ・赤いふちを出す）
     const poison = player.poisonT > 0 && d <= 8;   // 毒のダメージは緑
-    for (let k = 0; k < 14; k++) { const a = Math.random() * Math.PI * 2, v = 1.5 + Math.random() * 3.5; hurtParts.push({ x:player.x, y:player.y, vx:Math.cos(a) * v, vy:Math.sin(a) * v - 1, life:26, c:poison ? '#7aff7a' : '#ff5a4a' }); }
-    dmgTexts.push({ x:player.x + (Math.random() - 0.5) * 16, y:player.y - 22, t:44, v:d, c:poison ? '#9dff9d' : '#ff6b6b' });
+    if (d >= 18) hurtT = 14;
+    for (let k = 0; k < (d >= 18 ? 7 : 3); k++) { const a = Math.random() * Math.PI * 2, v = 1 + Math.random() * 2.5; hurtParts.push({ x:player.x, y:player.y, vx:Math.cos(a) * v, vy:Math.sin(a) * v - 0.8, life:20, c:poison ? '#7aff7a' : '#ff6b5a' }); }
+    dmgTexts.push({ x:player.x + (Math.random() - 0.5) * 14, y:player.y - 22, t:34, v:d, c:poison ? '#9dff9d' : '#ff8a80', s:16 });
+}
+function enemyHitFx(d) {   // 相手（ボス）に当たった時：小さな火花とダメージ数字
+    const poison = !pvp && boss.poisonT > 0 && d <= 8;
+    for (let k = 0; k < 4; k++) { const a = Math.random() * Math.PI * 2, v = 1 + Math.random() * 2; hurtParts.push({ x:boss.x, y:boss.y, vx:Math.cos(a) * v, vy:Math.sin(a) * v - 0.6, life:16, c:poison ? '#7aff7a' : '#fff1a8' }); }
+    dmgTexts.push({ x:boss.x + (Math.random() - 0.5) * 16, y:boss.y - boss.h / 2 - 6, t:28, v:d, c:poison ? '#9dff9d' : '#fff1a8', s:14 });
 }
 function drawHurtFx() {
     if (hurtT > 0) {
-        const a = hurtT / 24; ctx.fillStyle = `rgba(255,40,40,${0.5 * a})`;
-        ctx.fillRect(0, 0, 800, 26); ctx.fillRect(0, 424, 800, 26); ctx.fillRect(0, 26, 26, 398); ctx.fillRect(774, 26, 26, 398);   // 画面のふちが赤くなる
-        if (hurtT % 6 < 3) drawShape(ch.shape, player.x, player.y, 17, '#ff3b3b', 0.8);   // キャラが赤く点滅
-        ctx.strokeStyle = `rgba(255,255,255,${a})`; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(player.x, player.y, 14 + (24 - hurtT) * 1.4, 0, Math.PI * 2); ctx.stroke();   // 衝撃の輪
+        const a = hurtT / 14; ctx.fillStyle = `rgba(255,50,50,${0.22 * a})`;
+        ctx.fillRect(0, 0, 800, 10); ctx.fillRect(0, 440, 800, 10); ctx.fillRect(0, 10, 10, 430); ctx.fillRect(790, 10, 10, 430);   // 画面のふちがうっすら赤くなる
+        if (hurtT > 9) drawShape(ch.shape, player.x, player.y, 16, '#ff5a5a', 0.55);   // 最初の一瞬だけ、キャラが赤く光る
         hurtT--;
     }
     hurtParts = hurtParts.filter(p => p.life > 0);
-    for (const p of hurtParts) { p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--; ctx.globalAlpha = Math.max(0, p.life / 26); ctx.fillStyle = p.c; ctx.fillRect(p.x, p.y, 4, 4); }
+    for (const p of hurtParts) { p.x += p.vx; p.y += p.vy; p.vy += 0.15; p.life--; ctx.globalAlpha = Math.max(0, p.life / 20); ctx.fillStyle = p.c; ctx.fillRect(p.x, p.y, 3, 3); }
     ctx.globalAlpha = 1;
     dmgTexts = dmgTexts.filter(t => t.t > 0);
-    for (const t of dmgTexts) { t.t--; t.y -= 0.9; ctx.globalAlpha = Math.min(1, t.t / 20); ctx.font = "bold 20px sans-serif"; ctx.textAlign = "center"; ctx.lineWidth = 4; ctx.strokeStyle = "#000"; ctx.strokeText(`-${t.v}`, t.x, t.y); ctx.fillStyle = t.c; ctx.fillText(`-${t.v}`, t.x, t.y); }
+    for (const t of dmgTexts) { t.t--; t.y -= 0.7; ctx.globalAlpha = Math.min(1, t.t / 16); ctx.font = `bold ${t.s}px sans-serif`; ctx.textAlign = "center"; ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.strokeText(`-${t.v}`, t.x, t.y); ctx.fillStyle = t.c; ctx.fillText(`-${t.v}`, t.x, t.y); }
     ctx.globalAlpha = 1;
 }
 
@@ -1031,7 +1035,7 @@ function update() {
 
     for (let i = bullets.length - 1; i >= 0; i--) {
         const b = bullets[i];
-        if (b.type === 'beam') b.x += (boss.x - b.x) * (b.delay > 0 ? 0.25 : 0.1);   // 上からのレーザーは、相手を追う
+        if (b.type === 'beam') b.x += (boss.x - b.x) * (b.delay > 0 ? 0.2 : 0.07);   // 上からのレーザーは、相手を追う
         if (b.delay > 0) { b.delay--; continue; } // 予備動作
         if (b.ttl !== undefined && --b.ttl <= 0) { bullets.splice(i, 1); continue; }   // レーザーが消えるまで
         if (b.explode && --b.explode <= 0) { // 時限爆弾：扇状に破片を飛ばす
@@ -1140,7 +1144,11 @@ const BSTYLE = { seed:['#9be564',6], leaf:['#4ee68a',4], bomb:['#ff7a3d',9], fra
 
 // 対人戦：相手（左右反転）・相手の分身・相手の弾を描画
 function drawOpp() {
-    for (const c of opp.c) drawShape(oppCh.shape, 800 - c[0], c[1], 15, oppCh.color, c[2] ? 0.3 + 0.25 * c[3] : 0.55);
+    for (const c of opp.c) {
+        const cx = 800 - c[0];
+        drawShape(oppCh.shape, cx, c[1], 15, oppCh.color, c[2] ? 0.3 + 0.25 * Math.ceil(c[3] / 34) : 0.55);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(cx - 14, c[1] - 27, 28, 5); ctx.fillStyle = '#ff9a6a'; ctx.fillRect(cx - 13, c[1] - 26, 26 * c[3] / 100, 3);   // 相手の分身のHPバー
+    }
     drawShape(oppCh.shape, boss.x, boss.y, 15, oppCh.color, opp.inv > 0 ? 0.6 : 1);
     ctx.textAlign = "center"; ctx.font = "12px sans-serif"; ctx.fillStyle = "#ffd9b0"; ctx.fillText(oppName, boss.x, boss.y - 28);
     if (opp.rf > 0) {
@@ -1396,7 +1404,7 @@ function startStory(i) {
     startGame(0); storyStage = i; const S = bossCfg = STAGES[i];
     setLayout(S.map);   // ステージごとのマップ
     Object.assign(boss, { w:S.size, h:S.size, hp:S.hp, maxHp:S.hp, jumpPower:S.jump || -9, t:0, shield:false, flash:0, x:650, y:S.hover ? 200 : 340 });
-    marks = []; sched = []; laser = null; player.hurtCd = 0;
+    marks = []; sched = []; laser = null; player.hurtCd = 0; lastEh = boss.hp;
 }
 function storyCleared() {
     const first = storyStage >= storyProg;   // 初めてのクリアか
@@ -1843,7 +1851,7 @@ function draw() {
     if (gameState === "select") { drawSelect(); return; }
     if (gameState === "bossSelect") { drawBossSelect(); return; }
 
-    ctx.save(); if (hurtT > 10) ctx.translate((Math.random() - 0.5) * 7, (Math.random() - 0.5) * 7);   // 被弾の画面ゆれ
+    ctx.save(); if (hurtT > 10) ctx.translate((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3);   // 被弾の画面ゆれ
     { const tn = story ? bossCfg.tint : (pvp && online ? MAPTINT[pvpMap] : null); if (tn) { ctx.fillStyle = tn; ctx.fillRect(0, 0, 800, 450); } }
     ctx.strokeStyle = '#3d5a46'; ctx.lineWidth = 2; ctx.setLineDash([5,5]);
     ctx.beginPath(); ctx.moveTo(400,0); ctx.lineTo(400,450); ctx.stroke();
@@ -1907,6 +1915,9 @@ function draw() {
     ctx.restore();   // ゆれはここまで
     if (player.hp < lastHp) hurtFx(lastHp - player.hp);   // どんな原因でも、HPが減ったらエフェクト
     lastHp = player.hp;
+    const eh = pvp ? opp.hp : boss.hp;   // 相手(ボス)のHPが減ったら、当たったエフェクト
+    if (eh < lastEh) enemyHitFx(lastEh - eh);
+    lastEh = eh;
     drawHurtFx();
     if (online && pvp && !settled && (gameState === "clear" || gameState === "gameover")) settle(gameState === "clear");
     if (gameState === "playing" || gameState === "paused") {   // マナゲージ（左上）と、マナ切れ・マナ不足の警告
