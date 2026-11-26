@@ -96,15 +96,15 @@ const CHARS = [
  {id:'don',name:'ドン',shape:'tri',color:'#ff7a3d',hp:210,speed:2.2,
   desc:['HP 210','移動 遅い','グー:放物線爆弾','チョキ:時限破片弾','パー:爆弾3連']},
  {id:'hayate',name:'ハヤテ',shape:'dia',color:'#7fe8ff',hp:150,speed:3.2,
-  desc:['HP 150','移動 速い','グー:ブーメラン','チョキ:風刃3連','パー:加速(約4秒)']},
+  desc:['HP 150','移動 速い','グー:ブーメラン','チョキ:貫通する風刃','パー:加速(約4秒)']},
  {id:'yomi',name:'ヨミ',shape:'shuri',color:'#b0a0ff',hp:165,speed:2.8,
-  desc:['HP 165','移動 普通','グー/チョキ:手裏剣','パー:マナ12で影分身','(同じ攻撃を真似る)']},
+  desc:['HP 165','移動 普通','グー:手裏剣 チョキ:2連','パー:マナ12で影分身','(同じ攻撃を真似る)']},
  {id:'luna',name:'ルナ',shape:'moon',color:'#ffe97a',hp:145,speed:2.6,
   desc:['HP 145','移動 やや遅い','グー長押し:溜め撃ち','チョキ:追尾月光','パー:マナ10で流星群']}
 ];
 CHARS.push(
  {id:'goro',name:'ゴロー',shape:'rock',color:'#b09070',hp:270,speed:2.0,
-  desc:['HP 270','移動 とても遅い','グー:転がる岩','チョキ:小石散弾','パー:マナ14で岩の壁']},
+  desc:['HP 270','移動 とても遅い','グー:転がる岩','チョキ:岩落とし','パー:マナ14で岩の壁']},
  {id:'rai',name:'ライ',shape:'bolt',color:'#fff06a',hp:150,speed:3.0,
   desc:['HP 150','移動 やや速い','グー:超高速の稲妻','チョキ:蛇行する稲妻','パー:マナ12で天の光線']},
  {id:'mira',name:'ミラ',shape:'mirror',color:'#d6c8ff',hp:160,speed:2.8,
@@ -114,11 +114,11 @@ CHARS.push(   // ガチャで手に入る新キャラ（出る確率は SSR と�
  {id:'tec',name:'テック',shape:'gear',color:'#8fb8c8',hp:140,speed:2.6,gacha:true,
   desc:['HP 140','移動 やや遅い','グー:単発弾','チョキ:砲台を設置(最大3)','パー:全砲台が一斉射撃']},
  {id:'gat',name:'ガトリ',shape:'penta',color:'#ffb347',hp:130,speed:2.4,gacha:true,
-  desc:['HP 130','移動 遅い','グー:連射（長押し）','チョキ:7方向の弾幕','パー:マナを一気に回復']},
+  desc:['HP 130','移動 遅い','グー:連射（長押し）','チョキ:5連射（直線）','パー:マナを一気に回復']},
  {id:'poi',name:'ポイズ',shape:'cross',color:'#9be564',hp:125,speed:3.0,gacha:true,
-  desc:['HP 125','移動 速い','グー:毒の針','チョキ:毒針3連','パー:猛毒弾（長く効く）']},
+  desc:['HP 125','移動 速い','グー:毒の針','チョキ:毒針2連','パー:猛毒弾（長く効く）']},
  {id:'ber',name:'バーサ',shape:'flame',color:'#ff5a4a',hp:175,speed:2.9,gacha:true,
-  desc:['HP 175','移動 普通','HPが減るほど攻撃力UP','グー:猛撃 チョキ:乱れ撃ち','パー:HPを払いマナ全回復']}
+  desc:['HP 175','移動 普通','HPが減るほど攻撃力UP','グー:猛撃 チョキ:二連斬','パー:HPを払いマナ全回復']}
 );
 let ch = CHARS[0], clones = [];  // 分身リスト（ヨミの影分身 / ゴローの岩の壁）
 
@@ -250,7 +250,7 @@ function chooseChar(i) {
     else gameState = story ? "storySelect" : "bossSelect";
 }
 function startGame(lv) {
-    setLayout('a'); bn = equipBonus(ch.id); costAcc = 0;   // 装備ボーナスを有効に
+    setLayout('a'); bn = equipBonus(ch.id); costAcc = 0; sched = [];   // 装備ボーナスを有効に
     bossLv = lv; bossCfg = BOSSES[lv];
     Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0, healCd:0 });
     Object.assign(boss, { x:650, y:340, vx:2.0, vy:0, w:bossCfg.size, h:bossCfg.size, hp:bossCfg.hp,
@@ -679,7 +679,7 @@ document.getElementById('btnJoin').addEventListener('click', joinRoom);
 document.getElementById('btnBack').addEventListener('click', () => { if (inRoom) { leaveRoom(); return; } closeNet(); gameState = "select"; });
 
 function startPvp() {
-    setLayout(online ? pvpMap : 'a'); bn = ZERO;   // 対戦では装備の効果なし
+    setLayout(online ? pvpMap : 'a'); bn = ZERO; sched = [];   // 対戦では装備の効果なし
     matching = false; clearTimeout(matchTimer);
     myRematch = oppRematch = oppLeft = false; mySelected = false; oppReady = false; inRoom = pvp && !online;
     settled = false; ratingNote = "";
@@ -754,11 +754,19 @@ function processOppBullets() {
 
 // 技ごとの必要マナ（マナ不足の警告に使う。attack() の消費量と同じ値）
 const COST = {
-    mint:{Rock:1, Scissors:2, Paper:10}, don:{Rock:3, Scissors:4, Paper:8}, hayate:{Rock:1, Scissors:3, Paper:6},
+    mint:{Rock:1, Scissors:2, Paper:10}, don:{Rock:3, Scissors:4, Paper:8}, hayate:{Rock:1, Scissors:2, Paper:6},
     yomi:{Rock:1, Scissors:3, Paper:12}, luna:{Rock:3, Scissors:3, Paper:10}, goro:{Rock:2, Scissors:3, Paper:14},
     rai:{Rock:1, Scissors:2, Paper:12}, mira:{Rock:2, Scissors:3, Paper:8},
     tec:{Rock:1, Scissors:6, Paper:8}, gat:{Rock:1, Scissors:4}, poi:{Rock:1, Scissors:2, Paper:5}, ber:{Rock:2, Scissors:3}
 };
+
+// 少しあとに、そのときの位置から撃つ（連続して撃つ技に使う。ヨミの分身も同じ弾を撃つ。バーサは威力アップ）
+const shootLater = (d, o) => later(d, () => {
+    const m = ch.id === 'ber' ? 1 + (1 - player.hp / maxHP()) * 0.9 : 1;
+    const mk = (px, py) => bullets.push(Object.assign({ x:px, y:py, vy:0, life:140 }, o, { power:Math.round(o.power * m) }));
+    mk(player.x, player.y); if (ch.id === 'yomi' && clones.length) mk(clones[0].x, clones[0].y);
+});
+function runSched() { for (let i = sched.length - 1; i >= 0; i--) if (--sched[i].t <= 0) { const f = sched[i].fn; sched.splice(i, 1); f(); } }   // 予約された動作を進める（全モード共通）
 
 // --- キャラ別の攻撃 ---
 function attack() {
@@ -789,16 +797,16 @@ function attack() {
         break;
     case 'hayate': // 風：ブーメランと加速
         if (g === "Rock" && ammo >= 1) { F({ vx:8, power:18, type:'boom', boom:true, pierce:true, life:170 }); ammo -= 1; shotCooldown = 38; }
-        else if (g === "Scissors" && ammo >= 3) {
-            for (const d of [-0.12, 0, 0.12]) F({ vx:Math.cos(d) * 8, vy:Math.sin(d) * 8, power:8, type:'wind', life:100 });
-            ammo -= 3; shotCooldown = 24;
+        else if (g === "Scissors" && ammo >= 2) {   // 風刃：1発だけの、貫通する刃（拡散をやめた）
+            F({ vx:7.5, power:14, type:'wind', pierce:true, life:100 });
+            ammo -= 2; shotCooldown = 30;
         } else if (g === "Paper" && ammo >= 6 && player.haste <= 0) { player.haste = 240; ammo -= 6; shotCooldown = 20; }
         break;
     case 'yomi': // 忍：手裏剣と、同じ攻撃を真似る影分身
         if (g === "Rock" && ammo >= 1) { F({ vx:8.5, power:15, type:'shuri' }); ammo -= 1; shotCooldown = 24; }
-        else if (g === "Scissors" && ammo >= 3) {
-            for (const d of [-0.2, 0, 0.2]) F({ vx:Math.cos(d) * 7.5, vy:Math.sin(d) * 7.5, power:8, type:'shuri' });
-            ammo -= 3; shotCooldown = 30;
+        else if (g === "Scissors" && ammo >= 3) {   // 2連手裏剣：同じ方向に、少しずらして2発（拡散をやめた）
+            F({ vx:8, power:10, type:'shuri' }); shootLater(10, { vx:8, power:10, type:'shuri' });
+            ammo -= 3; shotCooldown = 36;
         } else if (g === "Paper" && ammo >= 12 && placeClone()) { ammo -= 12; shotCooldown = 40; }
         if (clones.length && bullets.length > n0) { // 影分身も同じ弾を撃つ
             const c = clones[0];
@@ -807,9 +815,9 @@ function attack() {
         break;
     case 'goro': // 岩：遅くて硬い。岩の壁が身代わりになる
         if (g === "Rock" && ammo >= 2) { F({ vx:4.5, power:32, type:'boulder', life:200 }); ammo -= 2; shotCooldown = 45; }
-        else if (g === "Scissors" && ammo >= 3) {
-            for (let k = -2; k <= 2; k++) F({ vx:7 + Math.abs(k) * 0.3, vy:k * 0.9, power:8, type:'pebble', life:35 });
-            ammo -= 3; shotCooldown = 34;
+        else if (g === "Scissors" && ammo >= 3) {   // 岩落とし：少しあとに、相手の頭上から大きな岩が落ちてくる（拡散をやめた）
+            later(20, () => bullets.push({ x:boss.x, y:-10, vx:0, vy:4.2, power:28, type:'boulder', life:300 }));
+            ammo -= 3; shotCooldown = 50;
         } else if (g === "Paper" && ammo >= 14 && placeClone()) { ammo -= 14; shotCooldown = 60; }
         break;
     case 'rai': // 雷：高速弾と、相手の位置に落ちる落雷
@@ -840,17 +848,17 @@ function attack() {
         break;
     case 'gat': // ガトリング：連射と弾幕。パーはマナを一気に回復
         if (g === "Rock" && ammo >= 1) { F({ vx:9, vy:(Math.random() - 0.5) * 0.9, power:5, type:'seed' }); player.gc = (player.gc || 0) + 1; if (player.gc % 2 === 0) ammo -= 1; shotCooldown = 4; }
-        else if (g === "Scissors" && ammo >= 4) { for (let k = -3; k <= 3; k++) F({ vx:Math.cos(k * 0.12) * 9, vy:Math.sin(k * 0.12) * 9, power:6, type:'wind', life:100 }); ammo -= 4; shotCooldown = 36; }
+        else if (g === "Scissors" && ammo >= 4) { for (let k = 0; k < 5; k++) shootLater(k * 5, { vx:9, power:6, type:'wind' }); ammo -= 4; shotCooldown = 40; }   // 5連射：まっすぐ1列に続けて撃つ（拡散をやめた）
         else if (g === "Paper" && ammo < 24) { ammo = Math.min(30, ammo + 14); shotCooldown = 150; }
         break;
     case 'poi': // 毒使い：当てた相手に、じわじわ効く毒
         if (g === "Rock" && ammo >= 1) { F({ vx:8, power:6, type:'dart' }); ammo -= 1; shotCooldown = 22; }
-        else if (g === "Scissors" && ammo >= 2) { for (const d of [-0.18, 0, 0.18]) F({ vx:Math.cos(d) * 7.5, vy:Math.sin(d) * 7.5, power:5, type:'dart' }); ammo -= 2; shotCooldown = 30; }
+        else if (g === "Scissors" && ammo >= 2) { F({ vx:8, power:6, type:'dart' }); shootLater(8, { vx:8, power:6, type:'dart' }); ammo -= 2; shotCooldown = 32; }   // 毒針2連（拡散をやめた）
         else if (g === "Paper" && ammo >= 5) { F({ vx:4.5, power:10, type:'venom' }); ammo -= 5; shotCooldown = 70; }
         break;
     case 'ber': // 狂戦士：HPが減るほど攻撃力アップ。パーはHPを払ってマナ全回復
         if (g === "Rock" && ammo >= 2) { F({ vx:8, power:24, type:'axe' }); ammo -= 2; shotCooldown = 28; }
-        else if (g === "Scissors" && ammo >= 3) { for (const d of [-0.2, 0, 0.2]) F({ vx:Math.cos(d) * 7.5, vy:Math.sin(d) * 7.5, power:12, type:'axe' }); ammo -= 3; shotCooldown = 30; }
+        else if (g === "Scissors" && ammo >= 3) { F({ vx:8, power:14, type:'axe' }); shootLater(9, { vx:8, power:14, type:'axe' }); ammo -= 3; shotCooldown = 34; }   // 二連斬（拡散をやめた）
         else if (g === "Paper" && player.hp > maxHP() * 0.2 && ammo < 28) { player.hp = Math.max(1, player.hp - Math.round(maxHP() * 0.12)); ammo = 30; player.haste = 150; shotCooldown = 200; }
         break;
     case 'luna': // 月：追尾月光と流星群
@@ -1030,6 +1038,7 @@ function update() {
     if (player.invuln > 0) player.invuln--;
     if (player.reflect > 0) player.reflect--;
     if (currentGesture === "No Hand" && Math.random() < 0.18 * (1 + bn.regen) && ammo < 30) ammo++;   // マナ回復の装備
+    runSched();
     const a0 = ammo; attack();
     if (bn.cost && ammo < a0) { costAcc += (a0 - ammo) * bn.cost; while (costAcc >= 1) { costAcc--; ammo = Math.min(30, ammo + 1); } }   // マナ消費をおさえる装備
 
@@ -1140,7 +1149,7 @@ function hitClone(bb) {
     return false;
 }
 
-const BSTYLE = { seed:['#9be564',6], leaf:['#4ee68a',4], bomb:['#ff7a3d',9], frag:['#ffb347',4], boom:['#7fe8ff',8], wind:['#c8f4ff',3], shuri:['#d0d0e8',4], moon:['#ffe97a',8], meteor:['#ffd54a',7], boulder:['#b09070',11], pebble:['#d8c8a8',3], bolt:['#fff06a',5], zig:['#fff9a0',4], ray:['#e8dcff',5], blaze:['#ffb347',8], cannon:['#ffb347',8], rock:['#ffff55',6], dart:['#7aff7a',4], venom:['#b3ff4d',9], axe:['#ff5a4a',8] };
+const BSTYLE = { seed:['#9be564',6], leaf:['#4ee68a',4], bomb:['#ff7a3d',9], frag:['#ffb347',4], boom:['#7fe8ff',8], wind:['#c8f4ff',5], shuri:['#d0d0e8',4], moon:['#ffe97a',8], meteor:['#ffd54a',7], boulder:['#b09070',11], pebble:['#d8c8a8',3], bolt:['#fff06a',5], zig:['#fff9a0',4], ray:['#e8dcff',5], blaze:['#ffb347',8], cannon:['#ffb347',8], rock:['#ffff55',6], dart:['#7aff7a',4], venom:['#b3ff4d',9], axe:['#ff5a4a',8] };
 
 // 対人戦：相手（左右反転）・相手の分身・相手の弾を描画
 function drawOpp() {
@@ -1378,7 +1387,6 @@ STAGES.forEach((S, i) => {   // 体力・ダメージ・攻撃の間隔・マッ
 });
 function storyTick() {   // ストーリーの敵の仕掛け（予告・レーザーなど）を毎フレーム進める
     boss.t++; if (boss.flash > 0) boss.flash--;
-    for (let i = sched.length - 1; i >= 0; i--) if (--sched[i].t <= 0) { const f = sched[i].fn; sched.splice(i, 1); f(); }
     for (const m of marks) m.t--;
     marks = marks.filter(m => m.t > 0);
     if (player.hurtCd > 0) player.hurtCd--;
