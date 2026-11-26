@@ -96,7 +96,7 @@ const CHARS = [
  {id:'don',name:'ドン',shape:'tri',color:'#ff7a3d',hp:210,speed:2.2,
   desc:['HP 210','移動 遅い','グー:放物線爆弾','チョキ:時限破片弾','パー:爆弾3連']},
  {id:'hayate',name:'ハヤテ',shape:'dia',color:'#7fe8ff',hp:150,speed:3.2,
-  desc:['HP 150','移動 速い','グー:ブーメラン','チョキ:つむじ風','パー:加速(約4秒)']},
+  desc:['HP 150','移動 速い','グー:ブーメラン','チョキ:加速する風の弾','パー:加速(約4秒)']},
  {id:'yomi',name:'ヨミ',shape:'shuri',color:'#b0a0ff',hp:165,speed:2.8,
   desc:['HP 165','移動 普通','グー:手裏剣','チョキ:分身と入れ替わる','パー:マナ12で影分身']},
  {id:'luna',name:'ルナ',shape:'moon',color:'#ffe97a',hp:145,speed:2.6,
@@ -106,20 +106,19 @@ CHARS.push(
  {id:'goro',name:'ゴロー',shape:'rock',color:'#b09070',hp:270,speed:2.0,
   desc:['HP 270','移動 とても遅い','グー:転がる岩','チョキ:岩落とし','パー:マナ14で岩の壁']},
  {id:'rai',name:'ライ',shape:'bolt',color:'#fff06a',hp:150,speed:3.0,
-  desc:['HP 150','移動 やや速い','グー:超高速の稲妻','チョキ:蛇行する稲妻','パー:マナ12で天の光線']},
+  desc:['HP 150','移動 やや速い','グー:超高速の稲妻','チョキ:蛇行する稲妻','パー:雷神化（約6秒）']},
  {id:'mira',name:'ミラ',shape:'mirror',color:'#d6c8ff',hp:160,speed:2.8,
-  desc:['HP 160','移動 普通','グー:光線','チョキ:相手の技を真似る','パー:反射バリア']}
+  desc:['HP 160','移動 普通','グー:光線','チョキ:相手のパーを真似る','パー:反射バリア']}
 );
 CHARS.push(   // ガチャで手に入る新キャラ（出る確率は SSR と同じ 2%）
  {id:'tec',name:'テック',shape:'gear',color:'#8fb8c8',hp:140,speed:2.6,gacha:true,
-  desc:['HP 140','移動 やや遅い','グー:単発弾','チョキ:砲台を設置(最大3)','パー:全砲台が一斉射撃']},
+  desc:['HP 140','移動 やや遅い','グー:単発弾','チョキ:迎撃ドローン設置','パー:ドローンが大砲を撃つ']},
  {id:'gat',name:'ガトリ',shape:'penta',color:'#ffb347',hp:130,speed:2.4,gacha:true,
   desc:['HP 130','移動 遅い','グー:連射（長押し）','チョキ:全マナで大弾','パー:マナを一気に回復']},
  {id:'poi',name:'ポイズ',shape:'cross',color:'#9be564',hp:125,speed:3.0,gacha:true,
-  desc:['HP 125','移動 速い','グー:毒の針','チョキ:毒霧(約4秒)','パー:猛毒弾（長く効く）']},
+  desc:['HP 125','移動 速い','グー:毒の針','チョキ:毒だまり(約5秒)','パー:猛毒弾（長く効く）']},
  {id:'ber',name:'バーサ',shape:'flame',color:'#ff5a4a',hp:175,speed:2.9,gacha:true,
-  desc:['HP 175','移動 普通','HPが減るほど攻撃力UP','グー:猛撃','チョキ:HP消費の大斧'],
-  desc2:['x']}
+  desc:['HP 175','HPが減るほど攻撃力UP','グー:猛撃 チョキ:HP消費の大斧','パー:HPを払いマナ全回復']}
 );
 let ch = CHARS[0], clones = [];  // 分身リスト（ヨミの影分身 / ゴローの岩の壁）
 
@@ -253,7 +252,7 @@ function chooseChar(i) {
 function startGame(lv) {
     setLayout('a'); bn = equipBonus(ch.id); costAcc = 0; sched = [];   // 装備ボーナスを有効に
     bossLv = lv; bossCfg = BOSSES[lv];
-    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0, healCd:0 });
+    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0, healCd:0, thunder:0, thunderCd:0 });
     Object.assign(boss, { x:650, y:340, vx:2.0, vy:0, w:bossCfg.size, h:bossCfg.size, hp:bossCfg.hp,
                           maxHp:bossCfg.hp, jumpPower:bossCfg.jump, moveTimer:0, atk:0, dropPlat:null, standing:null, poisonT:0, poisonD:0 });
     bullets = []; bossBullets = []; clones = [];
@@ -686,7 +685,7 @@ function startPvp() {
     settled = false; ratingNote = "";
     if (online) try { localStorage.setItem('spiritarena-inmatch', JSON.stringify({ opp:oppRating, mid:matchId, uid:oppUid })); } catch (e) {}
     showLobby(false);
-    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0, healCd:0 });
+    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0, healCd:0, thunder:0, thunderCd:0 });
     Object.assign(boss, { x:700, y:350, w:30, h:30, vx:0, vy:0 });
     bullets = []; bossBullets = []; clones = []; dead = new Set();
     opp = { x:100, y:350, hp:oppCh.hp, inv:0, rf:0, c:[], b:[] };
@@ -719,7 +718,7 @@ function sendState(force) {
     if (!conn || !conn.open) return;
     if (!force && (tick++ & 1)) return;                    // 約30回/秒
     for (const b of bullets) if (b.id === undefined) b.id = ++bid;
-    conn.send({ t:'s', x:player.x, y:player.y, hp:player.hp, inv:(player.haste > 0 || player.invuln > 0) ? 1 : 0, rf:player.charge | 0, rv:player.reflect > 0 ? 1 : 0,
+    conn.send({ t:'s', x:player.x, y:player.y, hp:player.hp, inv:(player.haste > 0 || player.invuln > 0) ? 1 : 0, rf:player.charge | 0, rv:player.reflect > 0 ? 1 : 0, th:player.thunder > 0 ? 1 : 0,
                 c: clones.map(c => [c.x, c.y, c.guard ? 1 : 0, Math.max(1, Math.round(c.hp / c.maxHp * 100))]),   // 残りHPの割合(%)
                 b: bullets.map(b => [b.id, b.x, b.y, b.power, b.type, b.delay > 0 ? 1 : 0]) });
 }
@@ -731,7 +730,7 @@ function processOppBullets() {
         const bx = 800 - bx0;
         if (btype === 'cloud') {   // 毒霧：入っている間、一定間隔で毒をうける（霧は消えない）
             const now = performance.now();
-            if (player.invuln <= 0 && Math.abs(bx - player.x) < 40 && Math.abs(by - player.y) < 44 && now - (beamT[id] || 0) > 330) {
+            if (player.invuln <= 0 && Math.abs(bx - player.x) < 49 && Math.abs(by - player.y) < 41 && now - (beamT[id] || 0) > 330) {
                 beamT[id] = now; player.hp = Math.max(0, player.hp - power); const pz = POISON.cloud; player.poisonT = pz[0]; player.poisonD = pz[1];
             }
             continue;
@@ -742,7 +741,9 @@ function processOppBullets() {
             continue;
         }
         let used = false;
-        for (let k = clones.length - 1; k >= 0; k--) {
+        const dr = clones.find(c => c.drone && Math.hypot(bx - c.x, by - c.y) < 55);
+        if (dr) { dr.hp -= power * 0.4; used = true; }   // 迎撃ドローンが撃ち落とす
+        if (!used) for (let k = clones.length - 1; k >= 0; k--) {
             const c = clones[k];
             if (Math.abs(bx - c.x) < 20 && Math.abs(by - c.y) < 20) { c.hp -= power; if (c.hp <= 0) clones.splice(k, 1); used = true; break; }
         }
@@ -765,7 +766,7 @@ const COST = {
     mint:{Rock:1, Scissors:2, Paper:10}, don:{Rock:3, Scissors:4, Paper:8}, hayate:{Rock:1, Scissors:3, Paper:6},
     yomi:{Rock:1, Scissors:2, Paper:12}, luna:{Rock:3, Scissors:3, Paper:10}, goro:{Rock:2, Scissors:3, Paper:14},
     rai:{Rock:1, Scissors:2, Paper:12}, mira:{Rock:2, Scissors:3, Paper:8},
-    tec:{Rock:1, Scissors:6, Paper:8}, gat:{Rock:1, Scissors:10}, poi:{Rock:1, Scissors:5, Paper:5}, ber:{Rock:2}
+    tec:{Rock:1, Scissors:6, Paper:6}, gat:{Rock:1, Scissors:10}, poi:{Rock:1, Scissors:5, Paper:5}, ber:{Rock:2}
 };
 
 // 少しあとに、そのときの位置から撃つ（連続して撃つ技に使う。ヨミの分身も同じ弾を撃つ。バーサは威力アップ）
@@ -778,10 +779,11 @@ function runSched() { for (let i = sched.length - 1; i >= 0; i--) if (--sched[i]
 
 // --- キャラ別の攻撃 ---
 function attack() {
-    const x = player.x, y = player.y, g = currentGesture, n0 = bullets.length;
+    const x = player.x, y = player.y, n0 = bullets.length;
+    let g = currentGesture;
     const F = o => bullets.push(Object.assign({ x, y, vy:0, life:140 }, o));
     let cid = ch.id;
-    if (cid === 'mira' && g === "Scissors" && pvp && oppCh && oppCh.id !== 'mira') cid = oppCh.id;   // ミラのチョキ：対戦相手のチョキの技を真似る
+    if (cid === 'mira' && g === "Scissors" && pvp && oppCh && oppCh.id !== 'mira') { cid = oppCh.id; g = "Paper"; }   // ミラのチョキ：対戦相手のパーの技を真似る
     if (ch.id === 'luna') { // ルナ：グー長押しでチャージ → 離すと発射
         if (g === "Rock") { if (ammo >= 3 && player.charge < 90) player.charge++; }
         else if (player.charge > 0) {
@@ -805,8 +807,8 @@ function attack() {
         break;
     case 'hayate': // 風：ブーメランと加速
         if (g === "Rock" && ammo >= 1) { F({ vx:8, power:18, type:'boom', boom:true, pierce:true, life:170 }); ammo -= 1; shotCooldown = 38; }
-        else if (g === "Scissors" && ammo >= 3) {   // つむじ風：相手の足もとから舞い上がる竜巻。ゆっくり相手を追うので、動いて避けよう
-            later(15, () => bullets.push({ x:boss.x, y:410, vx:0, vy:-3.4, power:12, type:'twister', bw:12, bh:34, multi:8, pierce:true, track:0.03, ttl:150, life:300 }));
+        else if (g === "Scissors" && ammo >= 3) {   // 疾風弾：ゆっくり出て、だんだん加速する風の弾（速くなる前に見切れば避けられる）
+            F({ vx:2.5, ax:0.12, vmax:9.5, power:22, type:'gale', life:200 });
             ammo -= 3; shotCooldown = 45;
         } else if (g === "Paper" && ammo >= 6 && player.haste <= 0) { player.haste = 240; ammo -= 6; shotCooldown = 20; }
         break;
@@ -831,13 +833,12 @@ function attack() {
         } else if (g === "Paper" && ammo >= 14 && placeClone()) { ammo -= 14; shotCooldown = 60; }
         break;
     case 'rai': // 雷：高速弾と、相手の位置に落ちる落雷
-        if (g === "Rock" && ammo >= 1) { F({ vx:9.5, power:14, type:'bolt', life:100 }); ammo -= 1; shotCooldown = 18; }
+        if (g === "Rock" && ammo >= 1) { const th = player.thunder > 0; F({ vx:9.5, power:th ? 18 : 14, type:'bolt', life:100 }); ammo -= 1; shotCooldown = th ? 11 : 18; }   // 雷神化中は、速く・強く
         else if (g === "Scissors" && ammo >= 2) {
             for (const d of [-1, 1]) F({ y:y + d * 10, vx:8, baseYo:y + d * 10, angle:d > 0 ? 0 : Math.PI, power:11, type:'zig', life:100 });
             ammo -= 2; shotCooldown = 26;
-        } else if (g === "Paper" && ammo >= 12) {
-            bullets.push({ x:boss.x, y:225, vx:0, vy:0, power:12, type:'beam', bw:22, bh:230, multi:8, pierce:true, delay:25, ttl:40, life:100 });   // 天からのレーザー：相手を追い、当たっている間ずっとダメージ
-            ammo -= 12; shotCooldown = 100;
+        } else if (g === "Paper" && ammo >= 12 && !(player.thunder > 0) && !(player.thunderCd > 0)) {   // 雷神化：約6秒、グーの連射が速く・強くなる（再び使えるまで約14秒）
+            player.thunder = 360; player.thunderCd = 840; ammo -= 12; shotCooldown = 20;
         }
         break;
     case 'mira': // 鏡：光線・無敵ダッシュ・反射バリア
@@ -846,14 +847,14 @@ function attack() {
             player.x = Math.max(15, Math.min(385, x + (keys.left ? -90 : 90))); player.invuln = 25; ammo -= 3; shotCooldown = 50;
         } else if (g === "Paper" && ammo >= 8) { player.reflect = 80; ammo -= 8; shotCooldown = 100; }
         break;
-    case 'tec': // メカニック：砲台を最大3台そなえる（砲台は自動で撃ち、パーで一斉射撃）
-        if (g === "Rock" && ammo >= 1) { F({ vx:8, power:14, type:'seed' }); ammo -= 1; shotCooldown = 26; }
-        else if (g === "Scissors" && ammo >= 6 && clones.length < 3) {
-            clones.push({ x:Math.max(15, Math.min(385, x + 30 + clones.length * 28)), y, vy:0, guard:false, turret:true, hp:30, maxHp:30, floorOnly:!player.isGround, t:clones.length * 25 });
+    case 'tec': // メカニック：迎撃ドローンで身を守り、ドローンから大砲を撃つ（守りのキャラ。攻撃は控えめ）
+        if (g === "Rock" && ammo >= 1) { F({ vx:8, power:12, type:'seed' }); ammo -= 1; shotCooldown = 28; }
+        else if (g === "Scissors" && ammo >= 6) {   // 迎撃ドローン：そばを飛び、近づく敵の弾を撃ち落とす（約10秒。弾を受けるとHPが減る）
+            clones = [{ x:Math.max(15, Math.min(385, x + 34)), y:y - 26, vy:0, guard:false, drone:true, hp:50, maxHp:50, ttl:600, floorOnly:false, t:0 }];
             ammo -= 6; shotCooldown = 40;
-        } else if (g === "Paper" && ammo >= 8 && clones.length) {
-            for (const c of clones) { c.flash = 14; for (const d of [-0.2, 0, 0.2]) bullets.push({ x:c.x, y:c.y, vx:Math.cos(d) * 7.5, vy:Math.sin(d) * 7.5, power:16, type:'cannon', life:140 }); }   // 発射の輪が光り、橙の弾が3方向に出る
-            ammo -= 8; shotCooldown = 70;
+        } else if (g === "Paper" && ammo >= 6 && clones.length) {   // ドローン砲：ドローンから、大きくて遅い砲弾を1発
+            const c = clones[0]; c.flash = 14; bullets.push({ x:c.x, y:c.y, vx:6, vy:0, power:24, type:'cannon', life:200 });
+            ammo -= 6; shotCooldown = 60;
         }
         break;
     case 'gat': // ガトリング：連射と弾幕。パーはマナを一気に回復
@@ -863,7 +864,13 @@ function attack() {
         break;
     case 'poi': // 毒使い：当てた相手に、じわじわ効く毒
         if (g === "Rock" && ammo >= 1) { F({ vx:8, power:6, type:'dart' }); ammo -= 1; shotCooldown = 22; }
-        else if (g === "Scissors" && ammo >= 5) { later(20, () => bullets.push({ x:boss.x, y:boss.y, vx:0, vy:0, power:3, type:'cloud', bw:36, bh:44, multi:20, pierce:true, ttl:240, life:300 })); ammo -= 5; shotCooldown = 60; }   // 毒霧：相手のいる場所に、約4秒残る毒の霧（入ると毒）
+        else if (g === "Scissors" && ammo >= 5) {   // 毒だまり：相手側のステージのどこかに、約5秒だけ毒の範囲が1つ出る（場所はランダム。入ると毒）
+            const ps = platforms.filter(p => p.x >= 400).concat([{ y:400 }]), p = ps[(Math.random() * ps.length) | 0];
+            const zx = 430 + Math.random() * 340, zy = p.y < 400 ? p.y - 26 : 372;
+            for (let i = bullets.length - 1; i >= 0; i--) if (bullets[i].type === 'cloud') bullets.splice(i, 1);   // 毒の範囲は同時に1つだけ
+            bullets.push({ x:zx, y:zy, vx:0, vy:0, power:3, type:'cloud', bw:34, bh:26, multi:20, pierce:true, ttl:300, life:400 });
+            ammo -= 5; shotCooldown = 60;
+        }
         else if (g === "Paper" && ammo >= 5) { F({ vx:4.5, power:10, type:'venom' }); ammo -= 5; shotCooldown = 70; }
         break;
     case 'ber': // 狂戦士：HPが減るほど攻撃力アップ。パーはHPを払ってマナ全回復
@@ -982,7 +989,13 @@ function update() {
     }
 
     // 分身の更新（重力・着地・砲台の攻撃）
+    clones = clones.filter(c => c.hp > 0);   // HPが0の分身（ドローン含む）を消す
     for (const c of clones) {
+        if (c.drone) {   // ドローン：プレイヤーのそばをふわふわ飛ぶ。約10秒で消える
+            c.x += (Math.max(15, Math.min(385, player.x + 34)) - c.x) * 0.1; c.y += (player.y - 26 - c.y) * 0.1;
+            if (--c.ttl <= 0) c.hp = 0;
+            continue;
+        }
         c.vy += gravity; c.y += c.vy;
         const cb = c.y + 15, cp = cb - c.vy;
         for (const p of (c.floorOnly ? [platforms[0]] : platforms)) {
@@ -1022,6 +1035,8 @@ function update() {
         bb.y += Math.sin(bb.angle) * bb.speed;
         }
 
+        const dr = clones.find(c => c.drone && Math.hypot(bb.x - c.x, bb.y - c.y) < 55);
+        if (dr) { dr.hp -= (bb.dmg || 15) * 0.4; bossBullets.splice(i, 1); continue; }   // 迎撃ドローンが撃ち落とす
         if (hitClone(bb)) { bossBullets.splice(i, 1); continue; } // 分身に当たった弾は消える
         if (player.reflect > 0 && Math.hypot(bb.x - player.x, bb.y - player.y) < 40) {
             const ra = Math.atan2(boss.y - bb.y, boss.x - bb.x);   // 反射した瞬間の相手の位置に向け、そのあとは直進
@@ -1045,6 +1060,8 @@ function update() {
     if (shotCooldown > 0) shotCooldown = Math.max(0, shotCooldown - (1 + bn.rate));   // 連射の装備
     if (player.haste > 0) player.haste--;
     if (player.healCd > 0) player.healCd--;
+    if (player.thunder > 0) player.thunder--;
+    if (player.thunderCd > 0) player.thunderCd--;
     if (player.invuln > 0) player.invuln--;
     if (player.reflect > 0) player.reflect--;
     if (currentGesture === "No Hand" && Math.random() < 0.18 * (1 + bn.regen) && ammo < 30) ammo++;   // マナ回復の装備
@@ -1066,6 +1083,7 @@ function update() {
             const a = Math.atan2(boss.y - b.y, boss.x - b.x);
             b.x += Math.cos(a) * b.spd; b.y += Math.sin(a) * b.spd;
         } else {
+            if (b.ax) b.vx = Math.min(b.vmax, b.vx + b.ax);   // だんだん加速する弾
             if (b.boom) { b.vx -= 0.05; if (b.x > 790 && b.vx > 0) b.vx = 0; if (b.vx < 0 && !b.back) { b.back = true; b.hit = false; } } // ブーメランは戻ってくる
             b.x += b.vx;
             if (b.baseYo !== undefined) { b.angle += 0.12; b.y = b.baseYo + Math.sin(b.angle) * 35; }
@@ -1160,7 +1178,7 @@ function hitClone(bb) {
     return false;
 }
 
-const BSTYLE = { seed:['#9be564',6], leaf:['#4ee68a',4], bomb:['#ff7a3d',9], frag:['#ffb347',4], boom:['#7fe8ff',8], wind:['#c8f4ff',5], shuri:['#d0d0e8',4], moon:['#ffe97a',8], meteor:['#ffd54a',7], boulder:['#b09070',11], pebble:['#d8c8a8',3], bolt:['#fff06a',5], zig:['#fff9a0',4], ray:['#e8dcff',5], blaze:['#ffb347',8], twister:['#d8f6ff',9], mega:['#ffb347',15], bigaxe:['#ff3b2a',13], cannon:['#ffb347',8], rock:['#ffff55',6], dart:['#7aff7a',4], venom:['#b3ff4d',9], axe:['#ff5a4a',8] };
+const BSTYLE = { seed:['#9be564',6], leaf:['#4ee68a',4], bomb:['#ff7a3d',9], frag:['#ffb347',4], boom:['#7fe8ff',8], wind:['#c8f4ff',5], shuri:['#d0d0e8',4], moon:['#ffe97a',8], meteor:['#ffd54a',7], boulder:['#b09070',11], pebble:['#d8c8a8',3], bolt:['#fff06a',5], zig:['#fff9a0',4], ray:['#e8dcff',5], blaze:['#ffb347',8], twister:['#d8f6ff',9], gale:['#c8f4ff',8], mega:['#ffb347',15], bigaxe:['#ff3b2a',13], cannon:['#ffb347',8], rock:['#ffff55',6], dart:['#7aff7a',4], venom:['#b3ff4d',9], axe:['#ff5a4a',8] };
 
 // 対人戦：相手（左右反転）・相手の分身・相手の弾を描画
 function drawOpp() {
@@ -1175,13 +1193,14 @@ function drawOpp() {
         ctx.strokeStyle = '#ffb347'; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.arc(boss.x, boss.y, 18 + opp.rf / 6, 0, Math.PI * 2); ctx.stroke();
     }
+    if (opp.th) { ctx.strokeStyle = '#fff06a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(boss.x, boss.y, 21 + Math.sin(performance.now() / 70) * 3, 0, Math.PI * 2); ctx.stroke(); }   // 相手の雷神化
     if (opp.rv) {
         ctx.strokeStyle = '#d6c8ff'; ctx.lineWidth = 3;
         ctx.beginPath(); ctx.arc(boss.x, boss.y, 38, 0, Math.PI * 2); ctx.stroke();
     }
     for (const b of opp.b) {
         if (b[4] === 'beam') { const w = b[5]; ctx.globalAlpha = w ? 0.55 : 0.9; ctx.fillStyle = w ? '#fff6a0' : '#ffe97a'; ctx.fillRect(800 - b[1] - (w ? 2 : 22), 0, w ? 4 : 44, 400); ctx.globalAlpha = 1; continue; }
-        if (b[4] === 'cloud') { ctx.globalAlpha = 0.28; ctx.fillStyle = '#7aff7a'; ctx.beginPath(); ctx.ellipse(800 - b[1], b[2], 40, 30, 0, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; continue; }
+        if (b[4] === 'cloud') { ctx.globalAlpha = 0.28; ctx.fillStyle = '#7aff7a'; ctx.beginPath(); ctx.ellipse(800 - b[1], b[2], 38, 24, 0, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 1; continue; }
         if (b[4] === 'twister') { ctx.strokeStyle = '#d8f6ff'; ctx.lineWidth = 3; for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.ellipse(800 - b[1], b[2] - k * 13, 9 - k * 1.2, 4, 0, 0, Math.PI * 2); ctx.stroke(); } continue; }
         const g = BSTYLE[b[4]] || ['#fff', 4];
         ctx.fillStyle = g[0]; ctx.beginPath(); ctx.arc(800 - b[1], b[2], g[1], 0, Math.PI * 2); ctx.fill();
@@ -1885,6 +1904,7 @@ function draw() {
 
     for (const c of clones) {
         drawShape(ch.shape, c.x, c.y, 15, ch.color, c.guard ? 0.3 + 0.25 * Math.ceil(c.hp / c.maxHp * 3) : 0.55);
+        if (c.drone) { ctx.strokeStyle = 'rgba(120,230,255,0.45)'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(c.x, c.y, 55, 0, Math.PI * 2); ctx.stroke(); }   // ドローンの迎撃範囲
         ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(c.x - 14, c.y - 27, 28, 5); ctx.fillStyle = '#4eef90'; ctx.fillRect(c.x - 13, c.y - 26, 26 * Math.max(0, c.hp / c.maxHp), 3);   // 分身のHPバー
         if (c.flash > 0) { ctx.strokeStyle = '#ffd27a'; ctx.lineWidth = 3; ctx.globalAlpha = c.flash / 14; ctx.beginPath(); ctx.arc(c.x, c.y, 16 + (14 - c.flash) * 1.6, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1; c.flash--; }   // 砲台の発射の光
     }
@@ -1900,6 +1920,7 @@ function draw() {
     }
     if (player.poisonT > 0) { ctx.strokeStyle = '#7aff7a'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(player.x, player.y, 24, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }   // 毒状態
     if (ch.id === 'ber' && player.hp < maxHP() * 0.5) { ctx.strokeStyle = 'rgba(255,70,50,0.7)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(player.x, player.y, 20 + 3 * Math.sin(performance.now() / 120), 0, Math.PI * 2); ctx.stroke(); }   // 狂戦士の気迫
+    if (player.thunder > 0) { ctx.strokeStyle = '#fff06a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(player.x, player.y, 21 + Math.sin(performance.now() / 70) * 3, 0, Math.PI * 2); ctx.stroke(); }   // 雷神化
     if (player.haste > 0) { // ハヤテの加速
         ctx.strokeStyle = '#9ff'; ctx.lineWidth = 2;
         ctx.beginPath(); ctx.arc(player.x, player.y, 21, 0, Math.PI * 2); ctx.stroke();
@@ -1930,7 +1951,7 @@ function draw() {
     for (const b of bullets) {   // つむじ風・毒霧の見た目
         const tm = performance.now() / 300;
         if (b.type === 'twister') { ctx.strokeStyle = '#d8f6ff'; ctx.lineWidth = 3; for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.ellipse(b.x + Math.sin(tm * 3 + k) * 5, b.y - k * 13, 9 - k * 1.2, 4, 0, 0, Math.PI * 2); ctx.stroke(); } }
-        else if (b.type === 'cloud') { ctx.globalAlpha = 0.28; ctx.fillStyle = '#7aff7a'; ctx.beginPath(); ctx.ellipse(b.x, b.y, 40, 30, 0, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 0.5; for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.arc(b.x + Math.sin(tm + k * 1.7) * 22, b.y + Math.cos(tm * 1.3 + k) * 14, 4, 0, Math.PI * 2); ctx.fill(); } ctx.globalAlpha = 1; }
+        else if (b.type === 'cloud') { ctx.globalAlpha = 0.28; ctx.fillStyle = '#7aff7a'; ctx.beginPath(); ctx.ellipse(b.x, b.y, 38, 24, 0, 0, Math.PI * 2); ctx.fill(); ctx.globalAlpha = 0.5; for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.arc(b.x + Math.sin(tm + k * 1.7) * 22, b.y + Math.cos(tm * 1.3 + k) * 14, 4, 0, Math.PI * 2); ctx.fill(); } ctx.globalAlpha = 1; }
     }
     for (const bb of bossBullets) {   // 敵の弾（色・大きさ・四角は弾ごと）
         ctx.fillStyle = bb.color || '#ff33ff';
@@ -1954,7 +1975,8 @@ function draw() {
         ctx.strokeStyle = empty && blink ? "#ff4d4d" : "rgba(255,255,255,0.5)"; ctx.lineWidth = 2; ctx.strokeRect(10, 8, 150, 16);
         ctx.textAlign = "left"; ctx.font = "bold 13px sans-serif"; ctx.fillStyle = "white"; ctx.fillText("マナ", 168, 21);
         if (empty) { ctx.fillStyle = blink ? "#ff6b6b" : "#ffb3b3"; ctx.fillText("マナ切れ！ 手をカメラから外すと回復", 200, 21); }
-        const need = (COST[(ch.id === 'mira' && currentGesture === 'Scissors' && pvp && oppCh.id !== 'mira') ? oppCh.id : ch.id] || {})[currentGesture];
+        const mim = ch.id === 'mira' && currentGesture === 'Scissors' && pvp && oppCh.id !== 'mira';
+        const need = (COST[mim ? oppCh.id : ch.id] || {})[mim ? 'Paper' : currentGesture];
         if (gameState === "playing" && need !== undefined && ammo < need) {   // 出そうとした技のマナが足りない
             ctx.textAlign = "center"; ctx.font = "bold 16px sans-serif";
             ctx.fillStyle = blink ? "#ff6b6b" : "#ffd0d0";
@@ -1972,6 +1994,7 @@ function draw() {
         };
         bar(10, 28, 150, player.hp, maxHP());
         ctx.textAlign = "left"; ctx.font = "bold 13px sans-serif"; ctx.fillStyle = "white"; ctx.fillText("HP", 168, 41);
+        if (ch.id === 'rai') { ctx.fillStyle = player.thunder > 0 ? "#fff06a" : player.thunderCd > 0 ? "#ffb347" : "#7be07b"; ctx.fillText(player.thunder > 0 ? `雷神 あと${Math.ceil(player.thunder / 60)}秒` : player.thunderCd > 0 ? `雷神 CT ${Math.ceil(player.thunderCd / 60)}秒` : "雷神化 OK", 200, 41); }
         if (ch.id === 'mint') { ctx.fillStyle = player.healCd > 0 ? "#ffb347" : "#7be07b"; ctx.fillText(player.healCd > 0 ? `回復 あと${Math.ceil(player.healCd / 60)}秒` : "回復 OK", 200, 41); }
         bar(640, 8, 150, pvp ? opp.hp : boss.hp, pvp ? oppCh.hp : boss.maxHp, "#ff6b8a");
         ctx.textAlign = "right"; ctx.fillText(pvp ? oppName : story ? bossCfg.name : `${BOSSES[bossLv].sub} Lv${bossLv + 1}`, 790, 38);
