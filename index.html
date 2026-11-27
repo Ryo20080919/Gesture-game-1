@@ -106,7 +106,7 @@ CHARS.push(
  {id:'goro',name:'ゴロー',shape:'rock',color:'#b09070',hp:270,speed:2.0,
   desc:['HP 270','移動 とても遅い','グー:転がる岩','チョキ:岩落とし','パー:マナ14で岩の壁']},
  {id:'rai',name:'ライ',shape:'bolt',color:'#fff06a',hp:150,speed:3.0,
-  desc:['HP 150','移動 やや速い','グー:超高速の稲妻','チョキ:落雷（予告あり）','パー:雷神化（約6秒）']},
+  desc:['HP 150','移動 やや速い','グー:超高速の稲妻','チョキ:しびれ弾(短い麻痺)','パー:雷神化（約6秒）']},
  {id:'mira',name:'ミラ',shape:'mirror',color:'#d6c8ff',hp:160,speed:2.8,
   desc:['HP 160','移動 普通','グー:光線','チョキ:相手のパーを真似る','パー:反射バリア(CT3秒)']}
 );
@@ -252,9 +252,9 @@ function chooseChar(i) {
 function startGame(lv) {
     setLayout('a'); bn = equipBonus(ch.id); costAcc = 0; sched = [];   // 装備ボーナスを有効に
     bossLv = lv; bossCfg = BOSSES[lv];
-    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0, healCd:0, thunder:0, thunderCd:0, reflectCd:0 });
+    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0, healCd:0, thunder:0, thunderCd:0, reflectCd:0, stunT:0 });
     Object.assign(boss, { x:650, y:340, vx:2.0, vy:0, w:bossCfg.size, h:bossCfg.size, hp:bossCfg.hp,
-                          maxHp:bossCfg.hp, jumpPower:bossCfg.jump, moveTimer:0, atk:0, dropPlat:null, standing:null, poisonT:0, poisonD:0 });
+                          maxHp:bossCfg.hp, jumpPower:bossCfg.jump, moveTimer:0, atk:0, dropPlat:null, standing:null, poisonT:0, poisonD:0, stunT:0 });
     bullets = []; bossBullets = []; clones = [];
     ammo = 30; shotCooldown = 0; bossShootCooldown = 0; currentGesture = "No Hand";
     player.hp = maxHP();   // 最大HPの装備ボーナス
@@ -685,7 +685,7 @@ function startPvp() {
     settled = false; ratingNote = "";
     if (online) try { localStorage.setItem('spiritarena-inmatch', JSON.stringify({ opp:oppRating, mid:matchId, uid:oppUid })); } catch (e) {}
     showLobby(false);
-    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0, healCd:0, thunder:0, thunderCd:0, reflectCd:0 });
+    Object.assign(player, { x:100, y:350, vx:0, vy:0, hp:ch.hp, speed:ch.speed, dropPlat:null, standing:null, invuln:0, reflect:0, charge:0, haste:0, poisonT:0, poisonD:0, healCd:0, thunder:0, thunderCd:0, reflectCd:0, stunT:0 });
     Object.assign(boss, { x:700, y:350, w:30, h:30, vx:0, vy:0 });
     bullets = []; bossBullets = []; clones = []; dead = new Set();
     opp = { x:100, y:350, hp:oppCh.hp, inv:0, rf:0, c:[], b:[] };
@@ -755,6 +755,7 @@ function processOppBullets() {
         if (!used && player.invuln <= 0 && Math.abs(bx - player.x) < 20 && Math.abs(by - player.y) < 20) {
             player.hp = Math.max(0, player.hp - power); used = true;
             const pz = POISON[btype]; if (pz) { player.poisonT = pz[0]; player.poisonD = pz[1]; }   // 毒を受ける
+            if (btype === 'shock') player.stunT = 48;   // 麻痺を受ける
         }
         if (used) { dead.add(id); conn.send({ t:'k', id }); }
     }
@@ -834,9 +835,9 @@ function attack() {
         break;
     case 'rai': // 雷：高速弾と、相手の位置に落ちる落雷
         if (g === "Rock" && ammo >= 1) { const th = player.thunder > 0; F({ vx:9.5, power:th ? 18 : 14, type:'bolt', life:100 }); ammo -= 1; shotCooldown = th ? 11 : 18; }   // 雷神化中は、速く・強く
-        else if (g === "Scissors" && ammo >= 3) {   // 落雷：相手のいる付近のどこかに雷が落ちる。落ちる場所に先に印が出るので、動けば避けられる
-            bullets.push({ x:Math.max(420, Math.min(780, boss.x + (Math.random() - 0.5) * 220)), y:225, vx:0, vy:0, power:20, type:'beam', fixed:true, bw:20, bh:230, multi:30, pierce:true, delay:36, ttl:8, life:100 });
-            ammo -= 3; shotCooldown = 50;
+        else if (g === "Scissors" && ammo >= 3) {   // しびれ弾：ゆっくり飛ぶ電撃弾。当たった相手は約0.8秒だけ麻痺して、攻撃できない（ダメージは小さい。動くことはできる）
+            F({ vx:6, power:6, type:'shock', life:200 });
+            ammo -= 3; shotCooldown = 60;
         } else if (g === "Paper" && ammo >= 12 && !(player.thunder > 0) && !(player.thunderCd > 0)) {   // 雷神化：約6秒、グーの連射が速く・強くなる（再び使えるまで約14秒）
             player.thunder = 360; player.thunderCd = 840; ammo -= 12; shotCooldown = 20;
         }
@@ -948,8 +949,9 @@ function update() {
     if (player.x < 15) player.x = 15;
     if (player.x > 385) player.x = 385;
 
+    if (!pvp && boss.stunT > 0) boss.stunT--;
     if (!pvp) {
-    if (bossCfg.move) { bossCfg.move(); } else {   // ストーリーの敵は専用の動き
+    if (boss.stunT > 0) { boss.vx = 0; } else if (bossCfg.move) { bossCfg.move(); } else {   // ストーリーの敵は専用の動き
     boss.moveTimer++;
     if (boss.moveTimer > bossCfg.moveInt) {
         // chase>0 のボスは中央（プレイヤー側）へ寄りやすく、プレイヤーが高所にいると飛び上がる
@@ -1012,7 +1014,7 @@ function update() {
     if (story && !pvp) storyTick();
     // ボスの攻撃
     if (!pvp) {
-    if (++bossShootCooldown > bossCfg.shootInt * (bossCfg.rate || 1)) { bossShoot(); bossShootCooldown = 0; }
+    if (!(boss.stunT > 0) && ++bossShootCooldown > bossCfg.shootInt * (bossCfg.rate || 1)) { bossShoot(); bossShootCooldown = 0; }
     for (let i = bossBullets.length - 1; i >= 0; i--) {
         const bb = bossBullets[i];
         bb.life--;
@@ -1063,11 +1065,12 @@ function update() {
     if (player.thunder > 0) player.thunder--;
     if (player.thunderCd > 0) player.thunderCd--;
     if (player.reflectCd > 0) player.reflectCd--;
+    if (player.stunT > 0) player.stunT--;
     if (player.invuln > 0) player.invuln--;
     if (player.reflect > 0) player.reflect--;
     if (currentGesture === "No Hand" && Math.random() < 0.18 * (1 + bn.regen) && ammo < 30) ammo++;   // マナ回復の装備
     runSched();
-    const a0 = ammo; attack();
+    const a0 = ammo; if (!(player.stunT > 0)) attack();   // 麻痺中は攻撃できない
     if (bn.cost && ammo < a0) { costAcc += (a0 - ammo) * bn.cost; while (costAcc >= 1) { costAcc--; ammo = Math.min(30, ammo + 1); } }   // マナ消費をおさえる装備
 
     for (let i = bullets.length - 1; i >= 0; i--) {
@@ -1098,6 +1101,7 @@ function update() {
                 if (!boss.shield) {
                     boss.hp -= Math.max(1, Math.round(b.power * (1 + bn.atk)));   // 攻撃力の装備
                     const pz = POISON[b.type]; if (pz) { boss.poisonT = pz[0]; boss.poisonD = pz[1]; }   // 毒
+                    if (b.type === 'shock') boss.stunT = 48;   // 麻痺
                     if (boss.hp <= 0) { boss.hp = 0; gameState = "clear"; if (story) storyCleared(); }
                 }
             }
@@ -1179,7 +1183,7 @@ function hitClone(bb) {
     return false;
 }
 
-const BSTYLE = { seed:['#9be564',6], leaf:['#4ee68a',4], bomb:['#ff7a3d',9], frag:['#ffb347',4], boom:['#7fe8ff',8], wind:['#c8f4ff',5], shuri:['#d0d0e8',4], moon:['#ffe97a',8], meteor:['#ffd54a',7], boulder:['#b09070',11], pebble:['#d8c8a8',3], bolt:['#fff06a',5], zig:['#fff9a0',4], ray:['#e8dcff',5], blaze:['#ffb347',8], twister:['#d8f6ff',9], gale:['#c8f4ff',8], mega:['#ffb347',15], bigaxe:['#ff3b2a',13], cannon:['#ffb347',8], rock:['#ffff55',6], dart:['#7aff7a',4], venom:['#b3ff4d',9], axe:['#ff5a4a',8] };
+const BSTYLE = { seed:['#9be564',6], leaf:['#4ee68a',4], bomb:['#ff7a3d',9], frag:['#ffb347',4], boom:['#7fe8ff',8], wind:['#c8f4ff',5], shuri:['#d0d0e8',4], moon:['#ffe97a',8], meteor:['#ffd54a',7], boulder:['#b09070',11], pebble:['#d8c8a8',3], bolt:['#fff06a',5], zig:['#fff9a0',4], ray:['#e8dcff',5], blaze:['#ffb347',8], shock:['#fff06a',9], twister:['#d8f6ff',9], gale:['#c8f4ff',8], mega:['#ffb347',15], bigaxe:['#ff3b2a',13], cannon:['#ffb347',8], rock:['#ffff55',6], dart:['#7aff7a',4], venom:['#b3ff4d',9], axe:['#ff5a4a',8] };
 
 // 対人戦：相手（左右反転）・相手の分身・相手の弾を描画
 function drawOpp() {
@@ -1326,36 +1330,36 @@ const STAGES = [
        else fanAt(5, 3.2, 0.17, '#d6c8ff');
    } },
  // ===== WORLD 3 星のそら =====
- { id:'3-1', name:'ホウキボシ', title:'彗星', color:'#ffb3f0', pts:8, spiky:true, size:42, hover:true, noPlat:true, shootInt:11,
+ { id:'3-1', name:'ホウキボシ', title:'彗星', color:'#ffb3f0', pts:8, spiky:true, size:42, hover:true, noPlat:true, shootInt:16,
    blurb:['長い尾を引いて、星がそらを駆けぬける。', '尾からは、渦をまく光がふりそそぐ！'],
    move() { hoverAt(610, 170, 150, 50, 28, 40); },
-   atk(n) { bb_({ x:boss.x, y:boss.y, speed:2.6, angle:n * 0.37, turn:0, r:5, color:'#ffb3f0' }); if (n % 20 === 0) for (const d of [-70, 70]) rainAt(clampX(player.x + d), 50, 5.5, 16, '#ffd6f7'); } },
- { id:'3-2', name:'ゲンジュウ', title:'幻獣キメラ', color:'#ff8c5a', pts:7, spiky:true, size:52, moveInt:40, moveSpd:6, chase:1.5, jump:-10, jumpP:0.6, shootInt:60,
+   atk(n) { bb_({ x:boss.x, y:boss.y, speed:2.4, angle:n * 0.37, turn:0, r:5, color:'#ffb3f0' }); if (n % 30 === 0) for (const d of [-70, 70]) rainAt(clampX(player.x + d), 50, 5.5, 16, '#ffd6f7'); } },
+ { id:'3-2', name:'ゲンジュウ', title:'幻獣キメラ', color:'#ff8c5a', pts:7, spiky:true, size:52, moveInt:50, moveSpd:5, chase:1, jump:-9.5, jumpP:0.4, shootInt:80,
    blurb:['いくつもの獣が混ざった、おそろしい影。', '牙も、炎も、地ひびきも、ぜんぶ使ってくる！'],
    atk(n) {
        const k = n % 4;
-       if (k === 0) { lobAt(60, 0.13, '#ff8c5a', 18); lobAt(85, 0.13, '#ffb38a', 18); }
-       else if (k === 1) { waveAt(-3.5, 22); fanAt(3, 3.2, 0.2, '#ff8c5a'); }
-       else if (k === 2) fanAt(5, 3.4, 0.17, '#ff8c5a');
-       else for (const d of [-0.3, 0, 0.3]) { const a = aimAng() + d; bb_({ x:boss.x, y:boss.y, vx:Math.cos(a) * 3.2, vy:Math.sin(a) * 3.2 - 1, grav:0.07, bounce:1, r:8, color:'#ffb38a', dmg:16, life:420 }); }
+       if (k === 0) lobAt(65, 0.13, '#ff8c5a', 18);
+       else if (k === 1) waveAt(-3, 22);
+       else if (k === 2) fanAt(3, 3, 0.2, '#ff8c5a');
+       else for (const d of [-0.25, 0.25]) { const a = aimAng() + d; bb_({ x:boss.x, y:boss.y, vx:Math.cos(a) * 3, vy:Math.sin(a) * 3 - 1, grav:0.07, bounce:1, r:8, color:'#ffb38a', dmg:16, life:420 }); }
    } },
- { id:'3-3', name:'ヤミノトビラ', title:'闇の門', color:'#8a6bff', pts:4, spiky:true, size:50, hover:true, noPlat:true, shootInt:95,
+ { id:'3-3', name:'ヤミノトビラ', title:'闇の門', color:'#8a6bff', pts:4, spiky:true, size:50, hover:true, noPlat:true, shootInt:100,
    blurb:['そらのはてに、闇の門がひらいている。', '門は身を守り、鬼火を放ち、光でなぎ払う…'],
-   move() { hoverAt(640, 80, 210, 30, 100, 60); boss.shield = boss.t % 360 >= 260; if (boss.t % 460 === 459) sweepLaser(aimAng() - 0.45, 0.011); },
-   atk() { if (boss.shield) fanAt(5, 2.9, 0.18, '#8a6bff'); else for (let k = 0; k < 5; k++) bb_({ x:boss.x, y:boss.y, orbit:50 + k * 11, oa:k * 2 * Math.PI / 5, r:8, color:'#b19cff', dmg:17 }); } },
+   move() { hoverAt(640, 80, 210, 30, 100, 60); boss.shield = boss.t % 380 >= 300; if (boss.t % 560 === 559) sweepLaser(aimAng() - 0.45, 0.011); },
+   atk() { if (boss.shield) fanAt(3, 2.8, 0.2, '#8a6bff'); else for (let k = 0; k < 4; k++) bb_({ x:boss.x, y:boss.y, orbit:50 + k * 12, oa:k * 2 * Math.PI / 4, r:8, color:'#b19cff', dmg:17 }); } },
  { id:'3-4', name:'スターヴ', title:'星喰らいの竜', color:'#ffd24d', pts:12, spiky:true, size:54, hover:true, noPlat:true,
    get phase() { return boss.hp > boss.maxHp * 0.6 ? 1 : boss.hp > boss.maxHp * 0.3 ? 2 : 3; },
-   get shootInt() { return [0, 80, 68, 56][this.phase]; },
+   get shootInt() { return [0, 95, 82, 70][this.phase]; },
    blurb:['夜空の星を食らう竜が、世界のはてを目ざす。', '力を取り戻すほど、攻撃は激しくなる…'],
    move() {
        hoverAt(640, 100, 170, 40, 90, 52);
-       const lp = [0, 0, 420, 340][this.phase];   // 第2形態から、予告つきのレーザー（なぎ払い）
+       const lp = [0, 0, 520, 440][this.phase];   // 第2形態から、予告つきのレーザー（なぎ払い）
        if (lp && boss.t % lp === lp - 1) sweepLaser(aimAng() - 0.45, 0.011);
    },
    atk(n) {
        const ph = this.phase;
        fanAt(5, 3 + ph * 0.2, 0.2, '#ffd24d');   // 5方向弾
-       if (n % 2 === 0) for (let k = 0; k < 3; k++) rainAt(clampX(30 + Math.random() * 350), 50, 6, 16, '#ffec99');   // 星の雨
+       if (n % 2 === 0) for (let k = 0; k < 2; k++) rainAt(clampX(30 + Math.random() * 350), 55, 5.5, 16, '#ffec99');   // 星の雨
    } },
  // ===== WORLD 4 灼熱の火山 =====
  { id:'4-1', name:'マグマラ', title:'溶岩のスライム', color:'#ff7a2e', pts:7, spiky:false, size:46, moveInt:60, moveSpd:4, chase:0.8, jump:-9, jumpP:0.35, shootInt:100,
@@ -1412,11 +1416,14 @@ const TINTS = [null, 'rgba(120,200,255,0.10)', 'rgba(150,120,255,0.12)', 'rgba(2
 const MAPNAMES = { a:'ひかりの森', b:'凍てつく峰', c:'星のそら', d:'灼熱の火山', e:'はての城', f:'砂漠の遺跡', g:'雲の上', h:'水晶の洞窟' };
 const MAPTINT = { a:null, b:TINTS[1], c:TINTS[2], d:TINTS[3], e:TINTS[4], f:'rgba(255,190,90,0.12)', g:'rgba(200,230,255,0.10)', h:'rgba(120,255,220,0.10)' };
 let pvpMap = 'a';   // 今回の対戦のマップ（待機役が決めて、相手に伝える）
+// ステージごとのダメージ倍率の微調整（強すぎた 2-3・3-2・3-3・4-4・5-3 を弱め、全体をなだらかな難しさに）
+const TUNE = [1, 1, 0.9, 1,   0.85, 1, 0.6, 1,   1, 0.85, 0.75, 1,   1, 1, 0.95, 0.7,   1, 1, 0.6, 0.9];
 STAGES.forEach((S, i) => {   // 体力・ダメージ・攻撃の間隔・マップを、ステージ番号に合わせて自動で決める
     const w = (i / 4) | 0;
     S.world = W[w]; S.map = 'abcde'[w]; S.tint = TINTS[w];
     S.hp = i === STAGES.length - 1 ? 1000 : Math.round((250 + i * 750 / 19) / 10) * 10;   // 体力は少しずつ増えて、最後(5-4)で1000
-    if (i >= 4) { S.dm = 0.7 + (i - 4) * 0.02; S.rate = 1.4 - (i - 4) * 0.025; }          // 2-1以降：ダメージ倍率(0.70→1.0)・攻撃の間隔(1.4倍→約1.0倍)
+    if (i >= 4) { S.dm = 0.7 + (i - 4) * 0.02; S.rate = 1.4 - (i - 4) * 0.025; }
+    S.dm = (S.dm || 1) * TUNE[i]; if (w === 2) S.rate = (S.rate || 1) * 1.1;   // ステージごとの微調整（下の TUNE）          // 2-1以降：ダメージ倍率(0.70→1.0)・攻撃の間隔(1.4倍→約1.0倍)
 });
 function storyTick() {   // ストーリーの敵の仕掛け（予告・レーザーなど）を毎フレーム進める
     boss.t++; if (boss.flash > 0) boss.flash--;
@@ -1921,6 +1928,7 @@ function draw() {
     }
     if (player.poisonT > 0) { ctx.strokeStyle = '#7aff7a'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(player.x, player.y, 24, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }   // 毒状態
     if (ch.id === 'ber' && player.hp < maxHP() * 0.5) { ctx.strokeStyle = 'rgba(255,70,50,0.7)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(player.x, player.y, 20 + 3 * Math.sin(performance.now() / 120), 0, Math.PI * 2); ctx.stroke(); }   // 狂戦士の気迫
+    if (player.stunT > 0) { ctx.strokeStyle = '#fff06a'; ctx.lineWidth = 3; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.arc(player.x, player.y, 22, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle = '#fff06a'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.fillText('しびれ！', player.x, player.y - 30); }
     if (player.thunder > 0) { ctx.strokeStyle = '#fff06a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(player.x, player.y, 21 + Math.sin(performance.now() / 70) * 3, 0, Math.PI * 2); ctx.stroke(); }   // 雷神化
     if (player.haste > 0) { // ハヤテの加速
         ctx.strokeStyle = '#9ff'; ctx.lineWidth = 2;
@@ -1929,6 +1937,7 @@ function draw() {
 
     if (pvp) drawOpp(); else drawBossShape(bossCfg, boss.x, boss.y, boss.w);
     if (story && !pvp) drawStoryFx();
+    if (!pvp && boss.stunT > 0) { ctx.strokeStyle = '#fff06a'; ctx.lineWidth = 3; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.w * 0.8, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }   // 麻痺中
     if (!pvp && boss.poisonT > 0) { ctx.strokeStyle = '#7aff7a'; ctx.lineWidth = 2; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.arc(boss.x, boss.y, boss.w * 0.75, 0, Math.PI * 2); ctx.stroke(); ctx.setLineDash([]); }
 
     // 弾は色ごとにまとめて描画（fillStyle切替とbeginPathの回数を削減）
