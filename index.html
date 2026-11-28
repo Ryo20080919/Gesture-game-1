@@ -898,19 +898,25 @@ function attack() {
     }
 }
 
-let lastEh = 0, lastHp = 0, hurtT = 0, hurtParts = [], dmgTexts = [];   // 被弾エフェクトの状態
+let lastEh = 0, lastHp = 0, hurtT = 0, hurtParts = [], dmgTexts = [], shakeT = 0, shakeA = 0, rings = [], hiG = '', hiPop = 0;   // 被弾エフェクトの状態
 function hurtFx(d) {   // ダメージを受けた時のエフェクト（控えめ：ダメージが大きいときだけ、画面ゆれ・赤いふちを出す）
     const poison = player.poisonT > 0 && d <= 8;   // 毒のダメージは緑
+    if (!poison) { shakeT = d >= 18 ? 10 : 5; shakeA = d >= 18 ? 3.5 : 2; }   // 被弾：画面が小さく揺れる
+    rings.push({ x:player.x, y:player.y, r:10, t:10, c:'255,120,110' });
     if (d >= 18) hurtT = 14;
     for (let k = 0; k < (d >= 18 ? 7 : 3); k++) { const a = Math.random() * Math.PI * 2, v = 1 + Math.random() * 2.5; hurtParts.push({ x:player.x, y:player.y, vx:Math.cos(a) * v, vy:Math.sin(a) * v - 0.8, life:20, c:poison ? '#7aff7a' : '#ff6b5a' }); }
     dmgTexts.push({ x:player.x + (Math.random() - 0.5) * 14, y:player.y - 22, t:34, v:d, c:poison ? '#9dff9d' : '#ff8a80', s:16 });
 }
 function enemyHitFx(d) {   // 相手（ボス）に当たった時：小さな火花とダメージ数字
     const poison = !pvp && boss.poisonT > 0 && d <= 8;
+    if (!poison) { shakeT = Math.max(shakeT, 4); shakeA = Math.max(shakeA, 1.4); }   // 命中：画面がほんの少し揺れる
+    rings.push({ x:boss.x, y:boss.y, r:8, t:9, c:'255,241,168' });
     for (let k = 0; k < 4; k++) { const a = Math.random() * Math.PI * 2, v = 1 + Math.random() * 2; hurtParts.push({ x:boss.x, y:boss.y, vx:Math.cos(a) * v, vy:Math.sin(a) * v - 0.6, life:16, c:poison ? '#7aff7a' : '#fff1a8' }); }
     dmgTexts.push({ x:boss.x + (Math.random() - 0.5) * 16, y:boss.y - boss.h / 2 - 6, t:28, v:d, c:poison ? '#9dff9d' : '#fff1a8', s:14 });
 }
 function drawHurtFx() {
+    rings = rings.filter(r => r.t > 0);   // 当たった所に広がる輪
+    for (const r of rings) { r.r += 1.8; r.t--; ctx.strokeStyle = `rgba(${r.c},${r.t / 10})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.stroke(); }
     if (hurtT > 0) {
         const a = hurtT / 14; ctx.fillStyle = `rgba(255,50,50,${0.22 * a})`;
         ctx.fillRect(0, 0, 800, 10); ctx.fillRect(0, 440, 800, 10); ctx.fillRect(0, 10, 10, 430); ctx.fillRect(790, 10, 10, 430);   // 画面のふちがうっすら赤くなる
@@ -923,6 +929,22 @@ function drawHurtFx() {
     dmgTexts = dmgTexts.filter(t => t.t > 0);
     for (const t of dmgTexts) { t.t--; t.y -= 0.7; ctx.globalAlpha = Math.min(1, t.t / 16); ctx.font = `bold ${t.s}px sans-serif`; ctx.textAlign = "center"; ctx.lineWidth = 3; ctx.strokeStyle = "rgba(0,0,0,0.7)"; ctx.strokeText(`-${t.v}`, t.x, t.y); ctx.fillStyle = t.c; ctx.fillText(`-${t.v}`, t.x, t.y); }
     ctx.globalAlpha = 1;
+}
+
+function drawHandIcon() {   // 画面の右下：いま認識している手（グー・チョキ・パー）のアイコン
+    const g = currentGesture, ok = g === 'Rock' || g === 'Scissors' || g === 'Paper', x = 722, y = 372, w = 70, h = 72;
+    if (g !== hiG) { hiG = g; hiPop = 8; }   // 手の形が変わった瞬間、アイコンが少し弾む
+    const s = 1 + (hiPop > 0 ? hiPop-- * 0.03 : 0), cx = x + w / 2, cy = y + 34;
+    ctx.fillStyle = 'rgba(10,25,18,0.75)'; ctx.fillRect(x, y, w, h); ctx.strokeStyle = ok ? '#4eef90' : '#667'; ctx.lineWidth = 2; ctx.strokeRect(x, y, w, h);
+    ctx.save(); ctx.translate(cx, cy); ctx.scale(s, s);
+    ctx.fillStyle = ok ? '#ffe0b8' : '#778'; ctx.strokeStyle = ok ? '#a07850' : '#556'; ctx.lineWidth = 1.5;
+    const rr = (a, b, c, d, r) => { ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(a, b, c, d, r); else ctx.rect(a, b, c, d); ctx.fill(); ctx.stroke(); };
+    if (g === 'Paper') { rr(-15, 0, 30, 22, 6); [[-17, 18], [-8.5, 27], [0, 30], [8.5, 27], [17, 20]].forEach(([fx, fh]) => rr(fx - 3.5, -fh + 2, 7, fh, 3)); }
+    else if (g === 'Scissors') { rr(-13, 4, 26, 18, 6); for (const a of [-0.22, 0.22]) { ctx.save(); ctx.translate(a * 40, 6); ctx.rotate(a); rr(-3.5, -28, 7, 30, 3); ctx.restore(); } for (const fx of [5, 12]) { ctx.beginPath(); ctx.arc(fx, 6, 4, 0, 6.28); ctx.fill(); ctx.stroke(); } }
+    else if (g === 'Rock') { rr(-15, 2, 30, 20, 7); for (let k = 0; k < 4; k++) { ctx.beginPath(); ctx.arc(-11 + k * 7.3, 1, 5, 0, 6.28); ctx.fill(); ctx.stroke(); } rr(-19, 8, 8, 10, 4); }
+    else { ctx.fillStyle = '#99a'; ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(g === 'No Hand' ? '手なし' : '？', 0, 6); }
+    ctx.restore();
+    ctx.fillStyle = ok ? '#fff' : '#99a'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.fillText(g === 'Rock' ? 'グー' : g === 'Scissors' ? 'チョキ' : g === 'Paper' ? 'パー' : '認識中', cx, y + h - 6);
 }
 
 function drawBG(t) { // 月と蛍
@@ -1899,7 +1921,7 @@ function draw() {
     if (gameState === "select") { drawSelect(); return; }
     if (gameState === "bossSelect") { drawBossSelect(); return; }
 
-    ctx.save(); if (hurtT > 10) ctx.translate((Math.random() - 0.5) * 3, (Math.random() - 0.5) * 3);   // 被弾の画面ゆれ
+    ctx.save(); if (shakeT > 0) { ctx.translate((Math.random() - 0.5) * shakeA, (Math.random() - 0.5) * shakeA); shakeT--; }   // 被弾の画面ゆれ
     { const tn = story ? bossCfg.tint : (pvp && online ? MAPTINT[pvpMap] : null); if (tn) { ctx.fillStyle = tn; ctx.fillRect(0, 0, 800, 450); } }
     ctx.strokeStyle = '#3d5a46'; ctx.lineWidth = 2; ctx.setLineDash([5,5]);
     ctx.beginPath(); ctx.moveTo(400,0); ctx.lineTo(400,450); ctx.stroke();
@@ -2010,6 +2032,7 @@ function draw() {
         bar(640, 8, 150, pvp ? opp.hp : boss.hp, pvp ? oppCh.hp : boss.maxHp, "#ff6b8a");
         ctx.textAlign = "right"; ctx.fillText(pvp ? oppName : story ? bossCfg.name : `${BOSSES[bossLv].sub} Lv${bossLv + 1}`, 790, 38);
     }
+    if (gameState === "playing" || gameState === "paused") drawHandIcon();
     if (gameState === "paused") drawPause();
     if (gameState === "clear") overlay(pvp ? "YOU WIN!!" : story ? `STAGE ${bossCfg.id} CLEAR!!` : "VICTORY!!", "#4eef90", pvp ? (netNote || `${oppName}に勝ちました！`) : (story ? storyClearText() : "精霊を鎮めました！おめでとう！"));
     else if (gameState === "gameover") overlay(pvp ? "YOU LOSE..." : "DEFEAT...", "#ff5555", pvp ? `${oppName}に負けました...` : "精霊の力に倒れてしまった...");
